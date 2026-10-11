@@ -115,10 +115,16 @@ class PredictionOut(BaseModel):
     label: Literal["alta", "normal"]
     decision_threshold: float
     model_version: str
+    in_sample: bool = Field(
+        description=(
+            "true si as_of_date cae dentro del periodo de entrenamiento del modelo (metadata `trained_on_range`): "
+            "el modelo ya vio esas fechas y la probabilidad no es una predicción fuera de muestra"
+        )
+    )
     created_at: datetime
     model_config = _ex(
         {"ticker": "NVDA", "as_of_date": "2025-12-30", "horizon_days": 5, "probability_high_vol": 0.62,
-         "predicted_class": 1, "label": "alta", "decision_threshold": 0.5, "model_version": "0.1.0",
+         "predicted_class": 1, "label": "alta", "decision_threshold": 0.5, "model_version": "0.1.0", "in_sample": False,
          "created_at": "2026-01-02T10:00:00Z"}
     )
 

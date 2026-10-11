@@ -23,6 +23,18 @@ class PredictionResult:
     predicted_class: int
     model_version: str
     decision_threshold: float
+    in_sample: bool
+
+
+def is_in_sample(metadata: dict, target: date) -> bool:
+    """True si ``target`` cae dentro del periodo con el que se entrenó el modelo.
+
+    El rango sale de ``trained_on_range`` en metadata.json (lo escribe el entrenamiento del proyecto 2 y va
+    cubierto por el hash del manifest): ``start`` = primera fila de entrenamiento, ``end`` = última fila de
+    train+validación (tras descartar los últimos 5 días de cada tramo).
+    """
+    rng = metadata["trained_on_range"]
+    return date.fromisoformat(rng["start"]) <= target <= date.fromisoformat(rng["end"])
 
 
 def require_model(store: ModelStore) -> None:
@@ -58,7 +70,8 @@ def predict(db: Session, store: ModelStore, symbols: list[str], target: date) ->
     proba = store.model.predict_proba(row)[:, 1]
     version = store.metadata["model_version"]
     thr = float(store.metadata["decision_threshold"])
+    in_sample = is_in_sample(store.metadata, target)
     return [
-        PredictionResult(t, target, float(p), int(p >= thr), version, thr)
+        PredictionResult(t, target, float(p), int(p >= thr), version, thr, in_sample)
         for t, p in zip(row.index, proba, strict=True)
     ]

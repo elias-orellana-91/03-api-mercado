@@ -93,6 +93,7 @@ def test_prediction_default_is_last_date(client, market):
     assert 0 <= b["probability_high_vol"] <= 1 and b["horizon_days"] == 5
     assert b["predicted_class"] == int(b["probability_high_vol"] >= b["decision_threshold"])
     assert b["label"] == ("alta" if b["predicted_class"] else "normal")
+    assert b["in_sample"] is False  # el dataset sintético (2024+) es posterior al entrenamiento
 
 
 def test_prediction_get_does_not_write_to_db(client, seeded_factory, market):

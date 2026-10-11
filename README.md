@@ -30,8 +30,8 @@ Documentación interactiva (Swagger, con ejemplos y esquemas de error): **`/docs
 | GET | `/metrics/{ticker}?start=&end=` | Retorno total, volatilidad anualizada, max drawdown y Sharpe |
 | GET | `/ranking?period=month\|quarter\|ytd\|custom&metric=return\|volatility\|sharpe&order=&start=&end=&limit=` | "¿Qué acción rindió mejor este mes?" (pensado para el agente) |
 | GET | `/sectors/summary?start=&end=` | Resumen por sector (cartera de igual ponderación) |
-| GET | `/predictions/{ticker}?date=` | Probabilidad de volatilidad alta en los próximos 5 días hábiles (por defecto, la última fecha). Solo calcula: no escribe en la BD |
-| GET | `/predictions/latest` | Todos los tickers en la última fecha |
+| GET | `/predictions/{ticker}?date=` | Probabilidad de volatilidad alta en los próximos 5 días hábiles (por defecto, la última fecha). Solo calcula: no escribe en la BD. Incluye `in_sample` (ver abajo) |
+| GET | `/predictions/latest` | Todos los tickers en la última fecha (cada ítem con `in_sample`) |
 | GET | `/model/info` | Versión, fecha de entrenamiento, métricas de test, features y hash (las versiones de librerías y avisos solo con `X-API-Key`) |
 | POST | `/admin/etl` | Dispara una carga incremental. Requiere cabecera `X-API-Key` |
 
@@ -120,6 +120,8 @@ docker compose up --build
 Se copiaron del proyecto 2 (`02-ml-volatilidad`, commit `73bddeb68bd30ce811667ddea59d56dce73c74c7`): `models/model.joblib`, `models/metadata.json` y `src/features.py` (→ `app/ml/features.py`, con un único cambio: el import del universo de tickers). La inferencia usa `build_features` sobre el historial leído de la base de datos y respeta `required_inputs` (SPY, VIX, volumen y **≥ 257 días**). Un test comprueba que, con los datos reales, las probabilidades de la API coinciden con ejecutar el pipeline directamente. Si se reentrena el modelo, hay que volver a copiar código y artefactos **juntos** y regenerar el manifiesto.
 
 El modelo (regresión logística) tiene ROC-AUC 0,646 en test: es una señal modesta de riesgo relativo, **no** una recomendación de inversión.
+
+**Campo `in_sample`.** Cada predicción (`/predictions/{ticker}` y cada ítem de `/predictions/latest`) trae `in_sample: true` cuando `as_of_date` cae dentro del periodo con el que se entrenó el modelo (`trained_on_range` de `app/ml/artifacts/metadata.json`, hoy 2016-01-08 a 2022-12-22, ambos inclusive). En esas fechas el modelo ya vio los datos, así que la probabilidad no es una predicción fuera de muestra (p. ej. AAPL el 2020-03-16 da ~100 % de volatilidad alta). Las fechas posteriores, o las del hueco de 5 días que se descartó al final del entrenamiento (2022-12-23 en adelante), dan `false`. El rango sale del metadata (cubierto por el hash del manifiesto), no del código.
 
 ## 🗄️ Base de datos y ETL
 

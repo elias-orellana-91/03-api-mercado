@@ -26,6 +26,7 @@ def _out(r: predictor.PredictionResult, created_at) -> PredictionOut:
         predicted_class=r.predicted_class,
         label="alta" if r.predicted_class else "normal",
         decision_threshold=r.decision_threshold,
+        in_sample=r.in_sample,
         model_version=r.model_version,
         created_at=created_at,
     )
@@ -53,7 +54,7 @@ def predictions_latest(db: Session = Depends(get_db), store: ModelStore = Depend
     response_model=PredictionOut,
     responses=RESP,
     summary="Probabilidad de volatilidad alta en los próximos 5 días hábiles",
-    description="Por defecto usa la última fecha con datos del ticker. La predicción se calcula al vuelo; este GET no escribe en la base de datos (`created_at` es el momento del cálculo).",
+    description="Por defecto usa la última fecha con datos del ticker. La predicción se calcula al vuelo; este GET no escribe en la base de datos (`created_at` es el momento del cálculo). `in_sample=true` indica que la fecha cae dentro del periodo de entrenamiento del modelo (ya la vio al entrenar).",
 )
 def prediction_for_ticker(
     ticker: Ticker = Depends(valid_ticker),
