@@ -32,10 +32,10 @@ services:
     ports:
       - "8000:8000"
 
-  # Tarea puntual: carga el seed (parquet) en la BD. El api ya migró el esquema (healthy => migrado).
+  # Tarea puntual: carga el seed (parquet) en la BD. El api ya migró el esquema (healthy => migrado). --if-empty evita recargar si ya hay precios.
   etl:
     build: .
-    command: ["python", "-m", "app.etl", "--seed"]
+    command: ["python", "-m", "app.etl", "--seed", "--if-empty"]
     restart: "no"
     depends_on:
       api:
