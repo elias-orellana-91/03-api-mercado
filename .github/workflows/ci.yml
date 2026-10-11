@@ -36,3 +36,40 @@ jobs:
       - run: pip install -r requirements-dev.txt
       - run: ruff check .
       - run: pytest -q
+
+  docker:
+    # Construye la imagen (sin publicarla), la arranca contra Postgres y consulta /health
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci          # credencial desechable del contenedor de CI, no es un secreto
+          POSTGRES_DB: ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - name: Construir la imagen
+        run: docker build -t api-mercado:ci .
+      - name: Arrancar el contenedor (migra + seed) y consultar /health
+        run: |
+          docker run -d --name api --network host \
+            -e DATABASE_URL=postgresql+psycopg://ci:ci@localhost:5432/ci \
+            -e AUTO_SEED=true -e PORT=8000 api-mercado:ci
+          for i in $(seq 1 60); do
+            if body=$(curl -fsS http://127.0.0.1:8000/health); then
+              echo "health: $body"
+              echo "$body" | grep -q '"status":"ok"' && exit 0
+            fi
+            sleep 2
+          done
+          echo "La API no quedó sana a tiempo"
+          docker logs api
+          exit 1

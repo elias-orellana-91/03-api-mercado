@@ -445,3 +445,10 @@ def test_rate_limit_with_two_hops_counts_the_right_ip(seeded_factory, model_stor
         ]
         other = c.get("/tickers", headers={"X-Forwarded-For": "198.51.100.2, 10.0.0.1"}).status_code
     assert codes == [200, 200, 200, 429, 429] and other == 200
+
+def test_ci_builds_docker_image_without_pushing():
+    root = Path(__file__).resolve().parents[1]
+    ci = (root / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    assert re.search(r"^  docker:\s*$", ci, re.M) and "docker build" in ci and "/health" in ci
+    assert "docker push" not in ci and "packages: write" not in ci
+    assert len(re.findall(r"^permissions:", ci, re.M)) == 1 and "contents: read" in ci

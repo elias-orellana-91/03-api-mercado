@@ -87,7 +87,7 @@ docker compose up --build
 
 `db` (postgres:16 con volumen y healthcheck) → `api` (aplica migraciones al iniciar) → `etl` (tarea puntual con `--seed`). La API queda en `http://localhost:8000`.
 
-> ⚠️ Los archivos Docker están escritos y revisados pero **aún no se han validado en una máquina con Docker**.
+> ⚠️ Los archivos Docker no se han probado a mano en una máquina con Docker; el CI (job `docker`) construye la imagen, la arranca contra Postgres y comprueba `/health` en cada push.
 
 ### Variables de entorno
 
