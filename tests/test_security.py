@@ -210,3 +210,54 @@ def test_client_ip_falls_back_to_socket_address():
     assert client_ip(Request(scope)) == "192.0.2.5"
     scope["headers"] = [(b"x-forwarded-for", b"1.1.1.1, 2.2.2.2 ")]
     assert client_ip(Request(scope)) == "2.2.2.2"
+
+def test_concurrent_admin_etl_only_one_gets_202(model_store):
+    """4 POST /admin/etl simultáneos: solo uno obtiene 202, el resto 409 (bloqueo atómico)."""
+    import threading
+    import time
+
+    codes: list[int] = []
+    codes_lock = threading.Lock()
+
+    class SlowSource(RecordingSource):
+        def fetch(self, tickers, start, end):
+            # mantiene el ETL "en curso" hasta que las otras 3 peticiones hayan sido rechazadas
+            deadline = time.monotonic() + 15
+            while time.monotonic() < deadline:
+                with codes_lock:
+                    if codes.count(409) >= 3:
+                        break
+                time.sleep(0.02)
+            return super().fetch(tickers, start, end)
+
+    src = SlowSource()
+    c, factory, _ = admin_client(model_store, source=src)
+    start = threading.Barrier(4)
+
+    def hit():
+        start.wait()
+        status = c.post("/admin/etl", headers={"X-API-Key": ADMIN_KEY}).status_code
+        with codes_lock:
+            codes.append(status)
+
+    threads = [threading.Thread(target=hit) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(30)
+    assert sorted(codes) == [202, 409, 409, 409]
+    assert src.called == 1
+    with factory() as s:
+        assert len(s.scalars(select(EtlRun)).all()) == 1
+    # el bloqueo se libera al terminar: un nuevo ETL vuelve a ser posible
+    assert c.post("/admin/etl", headers={"X-API-Key": ADMIN_KEY}).status_code == 202
+
+
+def test_etl_lock_released_even_if_etl_fails(model_store):
+    class Broken:
+        def fetch(self, *a, **k):
+            raise ConnectionError("sin red")
+
+    c, _, _ = admin_client(model_store, source=Broken())
+    assert c.post("/admin/etl", headers={"X-API-Key": ADMIN_KEY}).status_code == 202
+    assert c.post("/admin/etl", headers={"X-API-Key": ADMIN_KEY}).status_code == 202

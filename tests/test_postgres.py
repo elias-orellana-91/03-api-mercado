@@ -45,3 +45,12 @@ def test_migrations_and_idempotent_etl_on_postgres(pg, tmp_path):
         assert s.scalar(select(func.count()).select_from(Ticker)) == 16
         assert s.scalar(select(func.count()).select_from(Price)) == 16 * 40
     command.downgrade(Config("alembic.ini"), "base")
+
+def test_etl_advisory_lock_is_exclusive_on_postgres(pg):
+    factory = make_session_factory(pg)
+    a, b = etl.EtlLock(factory), etl.EtlLock(factory)
+    assert a.acquire() is True
+    assert b.acquire() is False  # otra sesión no lo obtiene mientras A lo tiene
+    a.release()
+    assert b.acquire() is True
+    b.release()

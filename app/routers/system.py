@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.db import EtlRun, Price, utcnow
 from app.deps import get_db, get_store, require_api_key
 from app.errors import ApiError
+from app.etl import EtlLock
 from app.ml.store import ModelStore
 from app.schemas import EtlRunOut, EtlTriggerResponse, HealthResponse
 
@@ -49,7 +50,7 @@ def health(db: Session = Depends(get_db), store: ModelStore = Depends(get_store)
     )
 
 
-def _run_etl(factory: sessionmaker[Session], source_factory) -> None:
+def _run_etl(factory: sessionmaker[Session], source_factory, lock: EtlLock) -> None:
     from app.etl import run_incremental
 
     try:
@@ -57,6 +58,8 @@ def _run_etl(factory: sessionmaker[Session], source_factory) -> None:
         log.info("ETL incremental finalizado (%d filas)", rows)
     except Exception:  # noqa: BLE001 - ya registrado en etl_runs
         log.exception("ETL incremental falló")
+    finally:
+        lock.release()
 
 
 @router.post(
@@ -73,10 +76,18 @@ def _run_etl(factory: sessionmaker[Session], source_factory) -> None:
     },
 )
 def trigger_etl(request: Request, background: BackgroundTasks, db: Session = Depends(get_db)):
-    running = db.scalar(
-        select(EtlRun).where(EtlRun.status == "running", EtlRun.started_at > utcnow() - STALE_RUN).limit(1)
-    )
-    if running:
-        raise ApiError(409, "etl_in_progress", f"Ya hay un ETL en curso (id {running.id}).")
-    background.add_task(_run_etl, request.app.state.session_factory, request.app.state.source_factory)
+    factory = request.app.state.session_factory
+    lock = EtlLock(factory)
+    if not lock.acquire():  # atómico: de varias peticiones simultáneas solo una lo obtiene
+        raise ApiError(409, "etl_in_progress", "Ya hay un ETL en curso.")
+    try:
+        running = db.scalar(
+            select(EtlRun).where(EtlRun.status == "running", EtlRun.started_at > utcnow() - STALE_RUN).limit(1)
+        )
+        if running:
+            raise ApiError(409, "etl_in_progress", f"Ya hay un ETL en curso (id {running.id}).")
+    except BaseException:
+        lock.release()
+        raise
+    background.add_task(_run_etl, factory, request.app.state.source_factory, lock)  # el task libera el lock
     return EtlTriggerResponse(status="accepted", message="Carga incremental iniciada; revisa /health para el resultado.")

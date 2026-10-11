@@ -14,11 +14,12 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+import threading
 from datetime import date, timedelta
 from pathlib import Path
 
 import pandas as pd
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -85,6 +86,59 @@ def upsert_vix(session: Session, vix: pd.Series) -> int:
 
 def _write_market_data(session: Session, data: MarketData) -> int:
     return upsert_prices(session, data.prices, data.volume) + upsert_vix(session, data.vix)
+
+
+# ------------------------------------------------------------------ exclusión mutua
+ETL_LOCK_ID = 42  # clave del advisory lock de Postgres
+_LOCAL_LOCK = threading.Lock()  # fallback atómico (SQLite/tests): un solo ETL por proceso
+
+
+class EtlLock:
+    """Bloqueo atómico de "un solo ETL a la vez".
+
+    * Postgres: ``pg_try_advisory_lock(42)`` sobre una conexión que se mantiene abierta hasta ``release()``
+      (el lock es de sesión), así que también protege entre procesos/réplicas.
+    * Otros motores (SQLite en tests): ``threading.Lock`` no bloqueante, válido para un solo proceso.
+    """
+
+    def __init__(self, factory: sessionmaker[Session]) -> None:
+        self._engine = factory.kw["bind"]
+        self._conn = None
+        self._held = False
+
+    def acquire(self) -> bool:
+        if self._held:
+            return True
+        if self._engine.dialect.name == "postgresql":
+            conn = self._engine.connect()
+            try:
+                got = bool(conn.execute(text("SELECT pg_try_advisory_lock(:k)"), {"k": ETL_LOCK_ID}).scalar())
+                conn.commit()
+            except Exception:
+                conn.close()
+                raise
+            if not got:
+                conn.close()
+                return False
+            self._conn = conn
+        elif not _LOCAL_LOCK.acquire(blocking=False):
+            return False
+        self._held = True
+        return True
+
+    def release(self) -> None:
+        if not self._held:
+            return
+        self._held = False
+        if self._conn is not None:
+            conn, self._conn = self._conn, None
+            try:
+                conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": ETL_LOCK_ID})
+                conn.commit()
+            finally:
+                conn.close()  # cerrar la sesión también libera el lock
+        else:
+            _LOCAL_LOCK.release()
 
 
 # ------------------------------------------------------------------ corridas
@@ -175,7 +229,14 @@ def main(argv: list[str] | None = None) -> int:
         else:
             from app.sources.yahoo import YahooSource
 
-            rows = run_incremental(factory, YahooSource())
+            lock = EtlLock(factory)
+            if not lock.acquire():
+                log.error("Ya hay un ETL en curso: se omite esta corrida")
+                return 1
+            try:
+                rows = run_incremental(factory, YahooSource())
+            finally:
+                lock.release()
     except Exception as exc:  # noqa: BLE001
         log.error("ETL falló: %s", exc)
         return 1
