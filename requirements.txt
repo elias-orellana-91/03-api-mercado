@@ -1,0 +1,15 @@
+fastapi==0.143.0
+uvicorn[standard]==0.54.0
+pydantic==2.14.0
+pydantic-settings==2.15.0
+SQLAlchemy==2.1.4
+alembic==1.20.0
+psycopg[binary]==3.3.6
+limits==5.8.0
+yfinance==1.7.0
+# Modelo del proyecto 2: versiones EXACTAS con las que se entrenó (ver app/ml/artifacts/metadata.json)
+scikit-learn==1.9.1
+numpy==2.5.4
+pandas==3.0.6
+joblib==1.6.0
+pyarrow==25.0.1
