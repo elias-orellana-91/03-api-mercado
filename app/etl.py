@@ -124,6 +124,15 @@ def run_seed(factory: sessionmaker[Session], seed_dir: Path = SEED_DIR) -> int:
     return rows
 
 
+def _validate_fetched(data: MarketData) -> None:
+    """Una fuente que "responde" sin datos no es un éxito: falla para que quede como ``failed`` en ``etl_runs``."""
+    if data.prices.empty or data.vix.empty:
+        raise RuntimeError("La fuente no devolvió datos")
+    faltan = set(TICKERS) - set(data.prices.dropna(how="all", axis=1).columns)
+    if faltan:
+        raise RuntimeError(f"Faltan tickers: {sorted(faltan)}")
+
+
 def run_incremental(factory: sessionmaker[Session], source: PriceSource, today: date | None = None) -> int:
     """Trae de la fuente solo las fechas que faltan (con un pequeño solapamiento)."""
     run_id = _start_run(factory, "incremental")
@@ -133,6 +142,7 @@ def run_incremental(factory: sessionmaker[Session], source: PriceSource, today: 
             last = s.scalar(select(func.max(Price.date)))
         start = date.fromisoformat(START_DATE) if last is None else last - timedelta(days=OVERLAP_DAYS)
         data = source.fetch(TICKERS, start, today + timedelta(days=1))  # fuera de la transacción de BD
+        _validate_fetched(data)
         with factory() as s, s.begin():
             rows = upsert_tickers(s) + _write_market_data(s, data)
     except Exception as exc:  # noqa: BLE001

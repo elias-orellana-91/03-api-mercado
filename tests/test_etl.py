@@ -181,3 +181,65 @@ def test_cli_seed_if_empty_is_noop_when_data_exists(tmp_path, monkeypatch):
         assert counts(f)[3] == 1
     finally:
         get_settings.cache_clear()
+
+def _empty_market() -> MarketData:
+    empty = pd.DataFrame(columns=TICKERS, dtype=float)
+    return MarketData(empty, empty.copy(), pd.Series(dtype=float, name="VIX"))
+
+
+class StaticSource:
+    def __init__(self, data: MarketData):
+        self.data = data
+
+    def fetch(self, *a, **k):
+        return self.data
+
+
+def _assert_failed_without_writes(f, expected_msg):
+    with f() as s:
+        run = s.scalars(select(EtlRun).order_by(EtlRun.id.desc())).first()
+    assert run.status == "failed" and expected_msg in run.error and run.finished_at is not None
+    assert counts(f)[:3] == (0, 0, 0)  # nada escrito (ni siquiera los tickers)
+
+
+def test_incremental_empty_source_is_failed_not_success():
+    f = new_factory()
+    with pytest.raises(RuntimeError, match="no devolvió datos"):
+        etl.run_incremental(f, StaticSource(_empty_market()), today=date(2024, 6, 1))
+    _assert_failed_without_writes(f, "La fuente no devolvió datos")
+
+
+def test_incremental_empty_vix_is_failed():
+    m = synthetic_market(n_days=10)
+    f = new_factory()
+    with pytest.raises(RuntimeError, match="no devolvió datos"):
+        etl.run_incremental(f, StaticSource(MarketData(m.prices, m.volume, m.vix.iloc[0:0])), today=date(2024, 6, 1))
+    _assert_failed_without_writes(f, "La fuente no devolvió datos")
+
+
+def test_incremental_missing_tickers_is_failed():
+    m = synthetic_market(n_days=10)
+    f = new_factory()
+    partial = MarketData(m.prices.drop(columns=["AAPL"]), m.volume, m.vix)
+    all_nan = m.prices.copy()
+    all_nan["MSFT"] = float("nan")
+    for prices, missing in ((partial, "AAPL"), (MarketData(all_nan, m.volume, m.vix), "MSFT")):
+        data = prices if isinstance(prices, MarketData) else MarketData(prices, m.volume, m.vix)
+        with pytest.raises(RuntimeError, match="Faltan tickers") as exc:
+            etl.run_incremental(f, StaticSource(data), today=date(2024, 6, 1))
+        assert missing in str(exc.value)
+    assert counts(f)[:3] == (0, 0, 0)
+
+
+def test_health_reflects_failed_etl_when_source_is_empty(model_store):
+    from fastapi.testclient import TestClient
+
+    from app.main import create_app
+    from tests.conftest import ADMIN_KEY, make_settings
+
+    f = new_factory()
+    app = create_app(make_settings(), f, model_store, lambda: StaticSource(_empty_market()))
+    with TestClient(app) as c:
+        assert c.post("/admin/etl", headers={"X-API-Key": ADMIN_KEY}).status_code == 202
+        last = c.get("/health").json()["etl"]["last_run"]
+    assert last["status"] == "failed" and "La fuente no devolvió datos" in last["error"]
