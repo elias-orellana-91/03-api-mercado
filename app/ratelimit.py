@@ -4,8 +4,9 @@ Se implementa con la librería ``limits`` (el motor que usa slowapi) en un middl
 ``SlowAPIMiddleware`` no detecta las rutas con las versiones recientes de FastAPI (que envuelve los
 routers incluidos) y dejaría el límite sin aplicar silenciosamente. Aquí no depende de las rutas.
 
-Nota de despliegue: detrás de un proxy (Render) la IP real llega en ``X-Forwarded-For``; uvicorn la
-resuelve con ``--proxy-headers`` (ver Dockerfile). El almacenamiento en memoria es por proceso: con
+Nota de despliegue: detrás de un proxy (Render) la IP real llega en ``X-Forwarded-For``. uvicorn NO se
+arranca con ``--proxy-headers`` (confiaría en una cabecera falsificable); aquí se usa la ÚLTIMA IP de la
+lista, la que agrega el proxy de confianza (ver ``client_ip``). El almacenamiento en memoria es por proceso: con
 varias réplicas el límite efectivo se multiplica (usar Redis en ese caso).
 """
 from __future__ import annotations
@@ -20,6 +21,20 @@ from starlette.responses import JSONResponse, Response
 from app.logging_conf import request_id_ctx
 
 
+def client_ip(request: Request) -> str:
+    """IP del cliente para el límite: la última de ``X-Forwarded-For`` (la agrega el proxy, no el cliente).
+
+    Las anteriores las puede inventar el cliente, así que rotarlas no evita el bloqueo. Sin la cabecera
+    (acceso directo) se usa la IP del socket.
+    """
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        last = xff.split(",")[-1].strip()
+        if last:
+            return last
+    return request.client.host if request.client else "unknown"
+
+
 class RateLimitMiddleware(BaseHTTPMiddleware):
     def __init__(self, app, rate: str, enabled: bool = True, exempt_paths: tuple[str, ...] = ("/health",)) -> None:
         super().__init__(app)
@@ -31,8 +46,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         if not self.enabled or request.url.path in self.exempt:
             return await call_next(request)
-        client = request.client.host if request.client else "unknown"
-        if not self.limiter.hit(self.item, client):
+        if not self.limiter.hit(self.item, client_ip(request)):
             return JSONResponse(
                 {
                     "error": {

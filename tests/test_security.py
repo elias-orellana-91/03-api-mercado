@@ -186,3 +186,27 @@ def test_yfinance_is_isolated_in_a_single_adapter():
         assert not re.search(r"^\s*(import|from)\s+yfinance", text, re.M), f"{rel} importa yfinance"
     imports = [p for p in root.rglob("*.py") if re.search(r"^\s*(import|from)\s+yfinance", p.read_text(encoding="utf-8"), re.M)]
     assert [p.name for p in imports] == ["yahoo.py"]
+
+
+def test_rate_limit_not_bypassed_by_fake_forwarded_for(seeded_factory, model_store):
+    """Rotar IPs falsas al inicio de X-Forwarded-For no evita el bloqueo: cuenta la última (la del proxy)."""
+    app = create_app(
+        make_settings(rate_limit="3/minute", rate_limit_enabled=True), seeded_factory, model_store, forbidden_source_factory
+    )
+    with TestClient(app) as c:
+        codes = [c.get("/tickers", headers={"X-Forwarded-For": f"10.9.8.{i}, 203.0.113.7"}).status_code for i in range(6)]
+        # otro cliente real (otra IP añadida por el proxy) tiene su propio contador
+        other = c.get("/tickers", headers={"X-Forwarded-For": "10.9.8.1, 198.51.100.9"}).status_code
+    assert codes == [200, 200, 200, 429, 429, 429]
+    assert other == 200
+
+
+def test_client_ip_falls_back_to_socket_address():
+    from starlette.requests import Request
+
+    from app.ratelimit import client_ip
+
+    scope = {"type": "http", "headers": [], "client": ("192.0.2.5", 1234)}
+    assert client_ip(Request(scope)) == "192.0.2.5"
+    scope["headers"] = [(b"x-forwarded-for", b"1.1.1.1, 2.2.2.2 ")]
+    assert client_ip(Request(scope)) == "2.2.2.2"

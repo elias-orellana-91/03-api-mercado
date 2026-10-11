@@ -99,14 +99,13 @@ docker compose up --build
 | `RATE_LIMIT` | Límite por IP, p. ej. `60/minute` | `60/minute` |
 | `LOG_LEVEL` | Nivel de logging | `INFO` |
 | `AUTO_SEED` | Solo en Docker: `true` carga el seed al iniciar si la BD está vacía | _(vacío)_ |
-| `FORWARDED_ALLOW_IPS` | Proxies de confianza para `X-Forwarded-For` (uvicorn). En Render, `*` | `127.0.0.1` |
 
 ## 🔐 Decisiones de seguridad
 
 - **Modelo verificado antes de cargarse.** `joblib` usa pickle, que puede ejecutar código arbitrario. `app/ml/artifacts/manifest.json` (versionado) guarda el SHA-256 de `model.joblib` y `metadata.json`; al arrancar se verifica el hash **antes** de `joblib.load`. Si no coincide, el modelo no se carga, `/health` pasa a `degraded` con el motivo y `/model/info` y `/predictions/*` responden 503. La ruta es fija dentro del paquete (nunca viene de input). Se avisa si las versiones de scikit-learn/pandas instaladas difieren de las del entrenamiento, y `requirements.txt` las fija exactamente. Tras reentrenar: `python -m app.ml.store --write-manifest`.
 - **API key de administración** en `X-API-Key`, leída del entorno y comparada con `secrets.compare_digest`. Sin clave configurada, el endpoint está deshabilitado. La clave nunca se loguea.
 - **CORS configurable**; nunca `*` en producción (la app no arranca).
-- **Rate limiting por IP** (ventana fija, `/health` exento). Se implementa con la librería `limits` en un middleware propio: el middleware de `slowapi` no encuentra las rutas con las versiones recientes de FastAPI y dejaba el límite sin aplicar. Detrás de un proxy hay que fijar `FORWARDED_ALLOW_IPS`; el contador es por proceso (con varias réplicas usar Redis).
+- **Rate limiting por IP** (ventana fija, `/health` exento). Se implementa con la librería `limits` en un middleware propio: el middleware de `slowapi` no encuentra las rutas con las versiones recientes de FastAPI y dejaba el límite sin aplicar. Detrás de un proxy (Render) se usa la **última** IP de `X-Forwarded-For` (la agrega el proxy; las anteriores las puede inventar el cliente) y uvicorn no se arranca con `--proxy-headers`. Hay que confirmar en el despliegue cuántos saltos de proxy hay; el contador es por proceso (con varias réplicas usar Redis).
 - **Sin secretos en el repo:** configuración solo por entorno; `.env` está en `.gitignore`; `.env.example` no contiene valores reales.
 - **Solo ORM/parámetros** (cero SQL con f-strings), contenedor sin root, errores 500 sin detalles internos y logging JSON con `X-Request-ID` (sin cabeceras ni cuerpos).
 - **Aislamiento de la fuente externa:** `yfinance` solo se importa en `app/sources/yahoo.py`; un test lo verifica y otros comprueban que ningún endpoint de lectura lo invoca.

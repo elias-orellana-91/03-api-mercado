@@ -31,5 +31,5 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
   CMD ["python", "-c", "import os,sys,urllib.request as u; sys.exit(0 if u.urlopen('http://127.0.0.1:'+os.environ.get('PORT','8000')+'/health', timeout=4).status==200 else 1)"]
 
 # Migra la BD, opcionalmente carga el seed si está vacía (AUTO_SEED=true) y arranca la API.
-# Detrás de un proxy, define FORWARDED_ALLOW_IPS (uvicorn lo lee del entorno) para ver la IP real del cliente.
-CMD ["sh", "-c", "alembic upgrade head && if [ \"$AUTO_SEED\" = \"true\" ]; then python -m app.etl --seed --if-empty; fi && exec uvicorn app.main:create_app --factory --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers"]
+# Sin --proxy-headers: la IP del cliente para el rate limit se toma de X-Forwarded-For en app/ratelimit.py.
+CMD ["sh", "-c", "alembic upgrade head && if [ \"$AUTO_SEED\" = \"true\" ]; then python -m app.etl --seed --if-empty; fi && exec uvicorn app.main:create_app --factory --host 0.0.0.0 --port ${PORT:-8000}"]

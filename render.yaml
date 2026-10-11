@@ -26,8 +26,6 @@ services:
         sync: false                  # pídelo en el panel: URL(s) de la web, separadas por coma
       - key: AUTO_SEED
         value: "true"                # carga data/seed solo si la BD está vacía (primer despliegue)
-      - key: FORWARDED_ALLOW_IPS
-        value: "*"                   # Render termina TLS en su proxy: confía en X-Forwarded-For
       - key: RATE_LIMIT
         value: 60/minute
       - key: LOG_LEVEL
