@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db import Price, Ticker, utcnow
-from app.deps import get_db, get_store, valid_ticker
+from app.deps import get_db, get_store, is_admin, valid_ticker
 from app.errors import ERROR_RESPONSES, ApiError
 from app.ml.store import ModelStore
 from app.schemas import ModelInfo, PredictionOut, PredictionsLatestResponse
@@ -79,10 +79,13 @@ def prediction_for_ticker(
     response_model=ModelInfo,
     responses={503: ERROR_RESPONSES[503]},
     summary="Versión, entrenamiento, métricas de test, features y hash del modelo",
+    description="Las versiones exactas de las librerías y los avisos del modelo solo se muestran con `X-API-Key`.",
+    response_model_exclude_unset=True,
 )
-def model_info(store: ModelStore = Depends(get_store)):
+def model_info(store: ModelStore = Depends(get_store), admin: bool = Depends(is_admin)):
     predictor.require_model(store)
     md = store.metadata
+    extra = {"library_versions": md.get("library_versions", {}), "warnings": store.version_warnings} if admin else {}
     return ModelInfo(
         model_name=md["model_name"],
         model_version=md["model_version"],
@@ -94,6 +97,5 @@ def model_info(store: ModelStore = Depends(get_store)):
         test_metrics=md["test_metrics"],
         baselines_test_metrics=md.get("baselines_test_metrics", {}),
         required_inputs=md["required_inputs"],
-        library_versions=md.get("library_versions", {}),
-        warnings=store.version_warnings,
+        **extra,
     )

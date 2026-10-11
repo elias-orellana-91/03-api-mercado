@@ -33,6 +33,12 @@ def valid_ticker(symbol: str = SymbolPath, db: Session = Depends(get_db)) -> Tic
     return ticker
 
 
+def is_admin(request: Request, key: str | None = Depends(api_key_header)) -> bool:
+    """True solo si la petición trae la clave de administración correcta (nunca falla: es para detalle opcional)."""
+    expected = request.app.state.settings.admin_api_key
+    return bool(expected and key and secrets.compare_digest(key.encode(), expected.encode()))
+
+
 def require_api_key(request: Request, key: str | None = Depends(api_key_header)) -> None:
     expected = request.app.state.settings.admin_api_key
     if not expected:

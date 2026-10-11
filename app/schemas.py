@@ -140,8 +140,8 @@ class ModelInfo(BaseModel):
     test_metrics: dict
     baselines_test_metrics: dict
     required_inputs: dict
-    library_versions: dict
-    warnings: list[str]
+    library_versions: dict | None = None  # solo con X-API-Key
+    warnings: list[str] | None = None  # solo con X-API-Key
 
 
 class ModelStatus(BaseModel):
@@ -164,11 +164,13 @@ class EtlRunOut(BaseModel):
 
 
 class HealthResponse(BaseModel):
+    """Público: solo ``status``. El detalle (database, model, etl, data) requiere ``X-API-Key``."""
+
     status: Literal["ok", "degraded", "unavailable"]
-    database: dict
-    model: ModelStatus
-    etl: dict
-    data: dict
+    database: dict | None = None
+    model: ModelStatus | None = None
+    etl: dict | None = None
+    data: dict | None = None
     model_config = _ex(
         {
             "status": "ok",

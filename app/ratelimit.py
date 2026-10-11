@@ -44,7 +44,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self.limiter = FixedWindowRateLimiter(MemoryStorage())
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
-        if not self.enabled or request.url.path in self.exempt:
+        # Los paths exentos (/health) dejan de estarlo si traen X-API-Key: así no sirven para adivinar la clave
+        if not self.enabled or (request.url.path in self.exempt and "x-api-key" not in request.headers):
             return await call_next(request)
         if not self.limiter.hit(self.item, client_ip(request)):
             return JSONResponse(

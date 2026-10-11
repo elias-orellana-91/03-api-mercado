@@ -20,11 +20,11 @@ flowchart LR
 
 ## 📡 Endpoints
 
-Documentación interactiva (Swagger, con ejemplos y esquemas de error): **`/docs`** (ReDoc en `/redoc`).
+Documentación interactiva (Swagger, con ejemplos y esquemas de error): **`/docs`** (ReDoc en `/redoc`). Con `ENVIRONMENT=production` la documentación y `/openapi.json` están **desactivados** (solo en local/desarrollo).
 
 | Método | Ruta | Descripción |
 |---|---|---|
-| GET | `/health` | Estado de BD, modelo (hash ok), última corrida del ETL y última fecha con datos |
+| GET | `/health` | Público: solo `status` (`ok`/`degraded`/`unavailable`). Con cabecera `X-API-Key`: además BD, modelo (hash ok), última corrida del ETL y última fecha con datos |
 | GET | `/tickers` | Lista de tickers con su sector |
 | GET | `/prices/{ticker}?start=&end=&limit=&offset=&order=` | Precios ajustados, validación de fechas y paginación (`limit` ≤ 5000) |
 | GET | `/metrics/{ticker}?start=&end=` | Retorno total, volatilidad anualizada, max drawdown y Sharpe |
@@ -32,7 +32,7 @@ Documentación interactiva (Swagger, con ejemplos y esquemas de error): **`/docs
 | GET | `/sectors/summary?start=&end=` | Resumen por sector (cartera de igual ponderación) |
 | GET | `/predictions/{ticker}?date=` | Probabilidad de volatilidad alta en los próximos 5 días hábiles (por defecto, la última fecha). Solo calcula: no escribe en la BD |
 | GET | `/predictions/latest` | Todos los tickers en la última fecha |
-| GET | `/model/info` | Versión, fecha de entrenamiento, métricas de test, features y hash |
+| GET | `/model/info` | Versión, fecha de entrenamiento, métricas de test, features y hash (las versiones de librerías y avisos solo con `X-API-Key`) |
 | POST | `/admin/etl` | Dispara una carga incremental. Requiere cabecera `X-API-Key` |
 
 **Errores** con esquema común: `404` ticker desconocido, `422` validación, `429` rate limit, `503` modelo o BD no disponibles.
@@ -44,7 +44,8 @@ Documentación interactiva (Swagger, con ejemplos y esquemas de error): **`/docs
 ### Ejemplos `curl`
 
 ```bash
-curl http://localhost:8000/health
+curl http://localhost:8000/health                                   # solo {"status": "ok"}
+curl -H "X-API-Key: $ADMIN_API_KEY" http://localhost:8000/health    # con detalle
 curl "http://localhost:8000/prices/AAPL?start=2025-12-01&end=2025-12-30&limit=10"
 curl "http://localhost:8000/metrics/NVDA?start=2025-01-01"
 curl "http://localhost:8000/ranking?period=month&metric=return&limit=3"
@@ -105,7 +106,7 @@ docker compose up --build
 - **Modelo verificado antes de cargarse.** `joblib` usa pickle, que puede ejecutar código arbitrario. `app/ml/artifacts/manifest.json` (versionado) guarda el SHA-256 de `model.joblib` y `metadata.json`; al arrancar se verifica el hash **antes** de `joblib.load`. Si no coincide, el modelo no se carga, `/health` pasa a `degraded` con el motivo y `/model/info` y `/predictions/*` responden 503. La ruta es fija dentro del paquete (nunca viene de input). Se avisa si las versiones de scikit-learn/pandas instaladas difieren de las del entrenamiento, y `requirements.txt` las fija exactamente. Tras reentrenar: `python -m app.ml.store --write-manifest`.
 - **API key de administración** en `X-API-Key`, leída del entorno y comparada con `secrets.compare_digest`. Sin clave configurada, el endpoint está deshabilitado. La clave nunca se loguea.
 - **CORS configurable**; nunca `*` en producción (la app no arranca).
-- **Rate limiting por IP** (ventana fija, `/health` exento). Se implementa con la librería `limits` en un middleware propio: el middleware de `slowapi` no encuentra las rutas con las versiones recientes de FastAPI y dejaba el límite sin aplicar. Detrás de un proxy (Render) se usa la **última** IP de `X-Forwarded-For` (la agrega el proxy; las anteriores las puede inventar el cliente) y uvicorn no se arranca con `--proxy-headers`. Hay que confirmar en el despliegue cuántos saltos de proxy hay; el contador es por proceso (con varias réplicas usar Redis).
+- **Rate limiting por IP** (ventana fija; `/health` exento salvo que lleve `X-API-Key`, para que no sirva de fuerza bruta). Se implementa con la librería `limits` en un middleware propio: el middleware de `slowapi` no encuentra las rutas con las versiones recientes de FastAPI y dejaba el límite sin aplicar. Detrás de un proxy (Render) se usa la **última** IP de `X-Forwarded-For` (la agrega el proxy; las anteriores las puede inventar el cliente) y uvicorn no se arranca con `--proxy-headers`. Hay que confirmar en el despliegue cuántos saltos de proxy hay; el contador es por proceso (con varias réplicas usar Redis).
 - **Sin secretos en el repo:** configuración solo por entorno; `.env` está en `.gitignore`; `.env.example` no contiene valores reales.
 - **Solo ORM/parámetros** (cero SQL con f-strings), contenedor sin root, errores 500 sin detalles internos y logging JSON con `X-Request-ID` (sin cabeceras ni cuerpos).
 - **Aislamiento de la fuente externa:** `yfinance` solo se importa en `app/sources/yahoo.py`; un test lo verifica y otros comprueban que ningún endpoint de lectura lo invoca.
@@ -133,7 +134,7 @@ El repo incluye un blueprint (`render.yaml`) con un web service Docker y una bas
 2. En Render: **New → Blueprint** y selecciona el repo. Render crea la base de datos y el servicio.
 3. Variables: `DATABASE_URL` se conecta sola a la base; `ADMIN_API_KEY` la **genera Render** (léela en el panel); define `CORS_ORIGINS` con la URL de la web (sin `*`).
 4. En el primer arranque, `AUTO_SEED=true` aplica las migraciones y carga el seed si la BD está vacía. Después, la actualización de datos se hace con `POST /admin/etl` (o un cron externo que llame a ese endpoint).
-5. Comprueba `https://<tu-servicio>.onrender.com/health` y `/docs`.
+5. Comprueba `https://<tu-servicio>.onrender.com/health` (devuelve `{"status": "ok"}`; con `X-API-Key` el detalle). `/docs` está desactivado en producción.
 
 Notas: el plan gratuito duerme el servicio tras inactividad (la primera petición tarda) y la base gratuita tiene límites; revisa la política vigente de Render.
 

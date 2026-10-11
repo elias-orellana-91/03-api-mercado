@@ -241,5 +241,5 @@ def test_health_reflects_failed_etl_when_source_is_empty(model_store):
     app = create_app(make_settings(), f, model_store, lambda: StaticSource(_empty_market()))
     with TestClient(app) as c:
         assert c.post("/admin/etl", headers={"X-API-Key": ADMIN_KEY}).status_code == 202
-        last = c.get("/health").json()["etl"]["last_run"]
+        last = c.get("/health", headers={"X-API-Key": ADMIN_KEY}).json()["etl"]["last_run"]
     assert last["status"] == "failed" and "La fuente no devolvió datos" in last["error"]

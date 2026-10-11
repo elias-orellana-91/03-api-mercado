@@ -8,10 +8,11 @@ from sqlalchemy import func, select
 
 from app.db import Prediction
 from app.ml.universe import TICKER_TO_SECTOR, TICKERS
+from tests.conftest import ADMIN_KEY
 
 
 def test_health_ok(client, market):
-    body = client.get("/health").json()
+    body = client.get("/health", headers={"X-API-Key": ADMIN_KEY}).json()
     assert body["status"] == "ok"
     assert body["database"]["ok"] is True
     assert body["model"]["loaded"] and body["model"]["hash_ok"]

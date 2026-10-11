@@ -11,7 +11,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.db import EtlRun, Price, utcnow
-from app.deps import get_db, get_store, require_api_key
+from app.deps import get_db, get_store, is_admin, require_api_key
 from app.errors import ApiError
 from app.etl import EtlLock
 from app.ml.store import ModelStore
@@ -26,23 +26,34 @@ STALE_RUN = timedelta(minutes=30)
     "/health",
     response_model=HealthResponse,
     tags=["Sistema"],
-    summary="Estado de la BD, del modelo, del ETL y de los datos",
-    description="200 si la BD responde (status `ok`, o `degraded` si el modelo no cargó); 503 si la BD no está disponible.",
+    summary="Estado del servicio (detalle de BD, modelo, ETL y datos solo con X-API-Key)",
+    description=(
+        "200 si la BD responde (status `ok`, o `degraded` si el modelo no cargó); 503 si la BD no está disponible. "
+        "Público: solo `status`. Con `X-API-Key` válida añade `database`, `model`, `etl` y `data`."
+    ),
+    response_model_exclude_unset=True,
 )
-def health(db: Session = Depends(get_db), store: ModelStore = Depends(get_store)):
+def health(
+    db: Session = Depends(get_db), store: ModelStore = Depends(get_store), admin: bool = Depends(is_admin)
+):
     model = store.status()
     try:
         db.execute(select(1))
         last_run = db.scalar(select(EtlRun).order_by(EtlRun.id.desc()).limit(1))
         last_date = db.scalar(select(func.max(Price.date)))
     except SQLAlchemyError:
-        body = HealthResponse(
-            status="unavailable", database={"ok": False}, model=model, etl={"last_run": None}, data={"last_date": None}
-        )
-        return JSONResponse(body.model_dump(mode="json"), status_code=503)
+        body = HealthResponse(status="unavailable")
+        if admin:
+            body = HealthResponse(
+                status="unavailable", database={"ok": False}, model=model, etl={"last_run": None}, data={"last_date": None}
+            )
+        return JSONResponse(body.model_dump(mode="json", exclude_unset=True), status_code=503)
     ok = model["loaded"] and model["hash_ok"]
+    status = "ok" if ok else "degraded"
+    if not admin:
+        return HealthResponse(status=status)
     return HealthResponse(
-        status="ok" if ok else "degraded",
+        status=status,
         database={"ok": True},
         model=model,
         etl={"last_run": EtlRunOut.model_validate(last_run, from_attributes=True) if last_run else None},

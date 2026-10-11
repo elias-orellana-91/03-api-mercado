@@ -69,6 +69,10 @@ def create_app(
         description=DESCRIPTION,
         lifespan=lifespan,
         license_info={"name": "MIT"},
+        # En producción no se publica la documentación interactiva ni el esquema OpenAPI
+        docs_url=None if settings.is_production else "/docs",
+        redoc_url=None if settings.is_production else "/redoc",
+        openapi_url=None if settings.is_production else "/openapi.json",
     )
     app.state.settings = settings
     app.state.session_factory = factory

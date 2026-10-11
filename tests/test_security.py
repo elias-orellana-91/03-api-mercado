@@ -155,7 +155,9 @@ def test_request_id_generated_and_propagated(client):
 def test_unavailable_database_gives_503(model_store):
     empty = make_session_factory(make_engine("sqlite://"))  # sin tablas => OperationalError
     with TestClient(create_app(make_settings(), empty, model_store, forbidden_source_factory)) as c:
-        h = c.get("/health")
+        pub = c.get("/health")
+        assert pub.status_code == 503 and pub.json() == {"status": "unavailable"}
+        h = c.get("/health", headers={"X-API-Key": ADMIN_KEY})
         assert h.status_code == 503 and h.json()["status"] == "unavailable" and h.json()["database"]["ok"] is False
         r = c.get("/tickers")
         assert r.status_code == 503 and r.json()["error"]["code"] == "database_unavailable"
@@ -261,3 +263,49 @@ def test_etl_lock_released_even_if_etl_fails(model_store):
     c, _, _ = admin_client(model_store, source=Broken())
     assert c.post("/admin/etl", headers={"X-API-Key": ADMIN_KEY}).status_code == 202
     assert c.post("/admin/etl", headers={"X-API-Key": ADMIN_KEY}).status_code == 202
+
+# ---------- información interna ----------
+def test_health_public_only_status_admin_gets_detail(client):
+    pub = client.get("/health")
+    assert pub.status_code == 200 and pub.json() == {"status": "ok"}
+    for bad in ({"X-API-Key": "mala"}, {"X-API-Key": ""}):
+        assert client.get("/health", headers=bad).json() == {"status": "ok"}
+    full = client.get("/health", headers={"X-API-Key": ADMIN_KEY}).json()
+    assert set(full) == {"status", "database", "model", "etl", "data"} and full["model"]["sha256"]
+
+
+def test_health_detail_hidden_even_when_etl_failed(model_store):
+    c, factory, _ = admin_client(model_store)
+    with factory() as s:
+        s.add(EtlRun(mode="incremental", status="failed", error="OperationalError: host secreto.internal"))
+        s.commit()
+    assert "secreto" not in c.get("/health").text
+    assert "secreto" in c.get("/health", headers={"X-API-Key": ADMIN_KEY}).text
+
+
+def test_model_info_hides_library_versions_without_key(client):
+    pub = client.get("/model/info").json()
+    assert "library_versions" not in pub and "warnings" not in pub and pub["sha256"]
+    full = client.get("/model/info", headers={"X-API-Key": ADMIN_KEY}).json()
+    assert full["library_versions"] and isinstance(full["warnings"], list)
+
+
+def test_docs_disabled_in_production_enabled_otherwise(seeded_factory, model_store):
+    prod = create_app(make_settings(environment="production"), seeded_factory, model_store, forbidden_source_factory)
+    with TestClient(prod) as c:
+        assert [c.get(p).status_code for p in ("/docs", "/redoc", "/openapi.json")] == [404, 404, 404]
+        assert c.get("/health").status_code == 200 and c.get("/tickers").status_code == 200
+    dev = create_app(make_settings(environment="development"), seeded_factory, model_store, forbidden_source_factory)
+    with TestClient(dev) as c:
+        assert [c.get(p).status_code for p in ("/docs", "/redoc", "/openapi.json")] == [200, 200, 200]
+
+
+def test_health_with_api_key_is_rate_limited(seeded_factory, model_store):
+    """/health sigue exento sin clave (healthchecks), pero con X-API-Key cuenta: no sirve para fuerza bruta."""
+    app = create_app(
+        make_settings(rate_limit="3/minute", rate_limit_enabled=True), seeded_factory, model_store, forbidden_source_factory
+    )
+    with TestClient(app) as c:
+        assert {c.get("/health").status_code for _ in range(8)} == {200}
+        codes = [c.get("/health", headers={"X-API-Key": "adivinando"}).status_code for _ in range(5)]
+    assert codes == [200, 200, 200, 429, 429]

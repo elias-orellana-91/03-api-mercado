@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from app.main import create_app
 from app.ml import store as store_mod
 from app.ml.store import ARTIFACTS_DIR, ModelStore, sha256_file, write_manifest
-from tests.conftest import forbidden_source_factory, make_settings, new_factory
+from tests.conftest import ADMIN_KEY, forbidden_source_factory, make_settings, new_factory
 
 
 @pytest.fixture
@@ -87,7 +87,7 @@ def test_api_reports_and_blocks_when_model_is_tampered(artifacts):
     bad = ModelStore(artifacts).load()
     app = create_app(make_settings(), new_factory(), bad, forbidden_source_factory)
     with TestClient(app) as c:
-        h = c.get("/health").json()
+        h = c.get("/health", headers={"X-API-Key": ADMIN_KEY}).json()
         assert h["status"] == "degraded" and h["model"]["hash_ok"] is False and h["model"]["loaded"] is False
         assert h["model"]["error"]
         for path in ("/model/info", "/predictions/latest"):
