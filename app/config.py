@@ -4,7 +4,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Annotated
 
-from pydantic import field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     rate_limit: str = "60/minute"
     rate_limit_enabled: bool = True
+    # Detrás de un proxy de confianza (Render) la IP del cliente viene en X-Forwarded-For; sin proxy esa cabecera
+    # la controla el cliente, así que solo se lee si TRUST_PROXY=true. PROXY_HOPS = IPs que agrega el proxy.
+    trust_proxy: bool = False
+    proxy_hops: int = Field(default=1, ge=1)
 
     @field_validator("database_url")
     @classmethod

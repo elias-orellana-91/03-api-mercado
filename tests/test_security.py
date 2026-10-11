@@ -191,9 +191,9 @@ def test_yfinance_is_isolated_in_a_single_adapter():
 
 
 def test_rate_limit_not_bypassed_by_fake_forwarded_for(seeded_factory, model_store):
-    """Rotar IPs falsas al inicio de X-Forwarded-For no evita el bloqueo: cuenta la última (la del proxy)."""
+    """Con proxy de confianza, rotar IPs falsas al inicio de X-Forwarded-For no evita el bloqueo."""
     app = create_app(
-        make_settings(rate_limit="3/minute", rate_limit_enabled=True), seeded_factory, model_store, forbidden_source_factory
+        make_settings(rate_limit="3/minute", rate_limit_enabled=True, trust_proxy=True), seeded_factory, model_store, forbidden_source_factory
     )
     with TestClient(app) as c:
         codes = [c.get("/tickers", headers={"X-Forwarded-For": f"10.9.8.{i}, 203.0.113.7"}).status_code for i in range(6)]
@@ -209,9 +209,9 @@ def test_client_ip_falls_back_to_socket_address():
     from app.ratelimit import client_ip
 
     scope = {"type": "http", "headers": [], "client": ("192.0.2.5", 1234)}
-    assert client_ip(Request(scope)) == "192.0.2.5"
+    assert client_ip(Request(scope), trust_proxy=True) == "192.0.2.5"
     scope["headers"] = [(b"x-forwarded-for", b"1.1.1.1, 2.2.2.2 ")]
-    assert client_ip(Request(scope)) == "2.2.2.2"
+    assert client_ip(Request(scope), trust_proxy=True) == "2.2.2.2"
 
 def test_concurrent_admin_etl_only_one_gets_202(model_store):
     """4 POST /admin/etl simultáneos: solo uno obtiene 202, el resto 409 (bloqueo atómico)."""
@@ -328,7 +328,11 @@ def test_dockerfile_hides_server_header_and_does_not_trust_proxy_headers():
     text = (Path(__file__).resolve().parents[1] / "Dockerfile").read_text(encoding="utf-8")
     cmd = text[text.rindex("CMD ["):]
     assert "--no-server-header" in cmd and "--proxy-headers" not in cmd
-    assert "FORWARDED_ALLOW_IPS" not in (Path(__file__).resolve().parents[1] / "render.yaml").read_text(encoding="utf-8")
+    render = (Path(__file__).resolve().parents[1] / "render.yaml").read_text(encoding="utf-8")
+    assert "FORWARDED_ALLOW_IPS" not in render
+    assert re.search(r"key: TRUST_PROXY\s+value: \"true\"", render) and re.search(r"key: PROXY_HOPS\s+value: \"1\"", render)
+    compose = (Path(__file__).resolve().parents[1] / "docker-compose.yml").read_text(encoding="utf-8")
+    assert "TRUST_PROXY" not in compose  # docker-compose expone el puerto sin proxy: no se confía en la cabecera
 
 # ---------- CI / Docker fijados ----------
 def test_ci_and_docker_supply_chain_pinning():
@@ -344,9 +348,9 @@ def test_ci_and_docker_supply_chain_pinning():
     for eco in ("pip", "github-actions", "docker"):
         assert f"package-ecosystem: {eco}" in dependabot
 
-def _limited_client(seeded_factory, model_store):
+def _limited_client(seeded_factory, model_store, **kw):
     app = create_app(
-        make_settings(rate_limit="3/minute", rate_limit_enabled=True), seeded_factory, model_store, forbidden_source_factory
+        make_settings(rate_limit="3/minute", rate_limit_enabled=True, trust_proxy=True, **kw), seeded_factory, model_store, forbidden_source_factory
     )
     return TestClient(app)
 
@@ -373,6 +377,71 @@ def test_rate_limit_empty_xff_elements_do_not_500(seeded_factory, model_store, v
     from app.ratelimit import client_ip
 
     scope = {"type": "http", "headers": [(b"x-forwarded-for", value.encode())], "client": ("192.0.2.5", 1)}
-    assert client_ip(Request(scope)) == ("a" if value.startswith("a") else "192.0.2.5")
+    assert client_ip(Request(scope), trust_proxy=True) == ("a" if value.startswith("a") else "192.0.2.5")
     with _limited_client(seeded_factory, model_store) as c:
         assert c.get("/tickers", headers={"X-Forwarded-For": value}).status_code == 200
+
+# ---------- TRUST_PROXY / PROXY_HOPS ----------
+def test_without_trust_proxy_rotating_xff_does_not_evade_limit(seeded_factory, model_store):
+    app = create_app(
+        make_settings(rate_limit="3/minute", rate_limit_enabled=True), seeded_factory, model_store, forbidden_source_factory
+    )
+    assert app.state.settings.trust_proxy is False  # por defecto no se confía
+    with TestClient(app) as c:
+        one_line = [c.get("/tickers", headers={"X-Forwarded-For": f"10.0.0.{i}"}).status_code for i in range(5)]
+        # el contador ya está agotado para la IP del socket; dos líneas rotando tampoco lo evitan
+        two_lines = [
+            c.get("/tickers", headers=[("X-Forwarded-For", f"10.1.0.{i}"), ("X-Forwarded-For", f"10.2.0.{i}")]).status_code
+            for i in range(3)
+        ]
+    assert one_line == [200, 200, 200, 429, 429]
+    assert two_lines == [429, 429, 429]
+
+
+@pytest.mark.parametrize(
+    ("header", "hops", "expected"),
+    [
+        ("1.1.1.1, 2.2.2.2", 1, "2.2.2.2"),
+        ("9.9.9.9, 1.1.1.1, 2.2.2.2", 2, "1.1.1.1"),
+        ("1.1.1.1, 2.2.2.2", 3, "1.1.1.1"),  # menos partes que saltos: la primera disponible
+        ("1.1.1.1", 2, "1.1.1.1"),
+        ("", 2, "192.0.2.5"),
+        (",,", 1, "192.0.2.5"),
+    ],
+)
+def test_client_ip_with_trust_proxy_hops(header, hops, expected):
+    from starlette.requests import Request
+
+    from app.ratelimit import client_ip
+
+    scope = {"type": "http", "headers": [(b"x-forwarded-for", header.encode())], "client": ("192.0.2.5", 1)}
+    assert client_ip(Request(scope), trust_proxy=True, proxy_hops=hops) == expected
+    assert client_ip(Request(scope), trust_proxy=False, proxy_hops=hops) == "192.0.2.5"  # sin trust se ignora
+
+
+def test_client_ip_multiple_lines_and_no_client_with_hops():
+    from starlette.requests import Request
+
+    from app.ratelimit import client_ip
+
+    headers = [(b"x-forwarded-for", b"7.7.7.7"), (b"x-forwarded-for", b"1.1.1.1, 2.2.2.2")]
+    scope = {"type": "http", "headers": headers, "client": None}
+    assert client_ip(Request(scope), trust_proxy=True, proxy_hops=2) == "1.1.1.1"
+    assert client_ip(Request({**scope, "headers": []}), trust_proxy=True) == "unknown"
+
+
+def test_proxy_hops_must_be_positive_and_settings_default():
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, proxy_hops=0)
+    s = Settings(_env_file=None)
+    assert s.trust_proxy is False and s.proxy_hops == 1
+
+
+def test_rate_limit_with_two_hops_counts_the_right_ip(seeded_factory, model_store):
+    with _limited_client(seeded_factory, model_store, proxy_hops=2) as c:
+        # IP real = penúltima; la última (proxy interno) es siempre la misma
+        codes = [
+            c.get("/tickers", headers={"X-Forwarded-For": f"9.9.9.{i}, 198.51.100.1, 10.0.0.1"}).status_code for i in range(5)
+        ]
+        other = c.get("/tickers", headers={"X-Forwarded-For": "198.51.100.2, 10.0.0.1"}).status_code
+    assert codes == [200, 200, 200, 429, 429] and other == 200

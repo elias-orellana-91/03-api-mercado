@@ -88,7 +88,13 @@ def create_app(
         return JSONResponse(_payload("database_unavailable", "Base de datos no disponible."), status_code=503)
 
     # El último middleware añadido es el más externo
-    app.add_middleware(RateLimitMiddleware, rate=settings.rate_limit, enabled=settings.rate_limit_enabled)
+    app.add_middleware(
+        RateLimitMiddleware,
+        rate=settings.rate_limit,
+        enabled=settings.rate_limit_enabled,
+        trust_proxy=settings.trust_proxy,
+        proxy_hops=settings.proxy_hops,
+    )
     if settings.cors_origins:
         app.add_middleware(
             CORSMiddleware,

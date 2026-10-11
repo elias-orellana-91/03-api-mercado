@@ -26,6 +26,10 @@ services:
         sync: false                  # pídelo en el panel: URL(s) de la web, separadas por coma
       - key: AUTO_SEED
         value: "true"                # carga data/seed solo si la BD está vacía (primer despliegue)
+      - key: TRUST_PROXY
+        value: "true"                # hay proxy de Render delante: lee la IP del cliente de X-Forwarded-For
+      - key: PROXY_HOPS
+        value: "1"                   # IPs que agrega el proxy; confirmar desplegando (ver README)
       - key: RATE_LIMIT
         value: 60/minute
       - key: LOG_LEVEL
