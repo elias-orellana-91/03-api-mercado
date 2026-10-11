@@ -309,3 +309,23 @@ def test_health_with_api_key_is_rate_limited(seeded_factory, model_store):
         assert {c.get("/health").status_code for _ in range(8)} == {200}
         codes = [c.get("/health", headers={"X-API-Key": "adivinando"}).status_code for _ in range(5)]
     assert codes == [200, 200, 200, 429, 429]
+
+# ---------- cabeceras de seguridad ----------
+def test_security_headers_on_all_kinds_of_responses(seeded_factory, model_store):
+    app = create_app(
+        make_settings(rate_limit="2/minute", rate_limit_enabled=True), seeded_factory, model_store, forbidden_source_factory
+    )
+    with TestClient(app) as c:
+        responses = [c.get("/health"), c.get("/tickers"), c.get("/prices/ZZZ"), c.get("/tickers"), c.get("/tickers")]
+    assert [r.status_code for r in responses] == [200, 200, 404, 429, 429]  # OK, 404 y 429
+    for r in responses:
+        assert r.headers["strict-transport-security"].startswith("max-age=")
+        assert r.headers["x-content-type-options"] == "nosniff"
+        assert r.headers["cache-control"] == "no-store"
+
+
+def test_dockerfile_hides_server_header_and_does_not_trust_proxy_headers():
+    text = (Path(__file__).resolve().parents[1] / "Dockerfile").read_text(encoding="utf-8")
+    cmd = text[text.rindex("CMD ["):]
+    assert "--no-server-header" in cmd and "--proxy-headers" not in cmd
+    assert "FORWARDED_ALLOW_IPS" not in (Path(__file__).resolve().parents[1] / "render.yaml").read_text(encoding="utf-8")

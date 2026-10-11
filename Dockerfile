@@ -32,4 +32,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
 
 # Migra la BD, opcionalmente carga el seed si está vacía (AUTO_SEED=true) y arranca la API.
 # Sin --proxy-headers: la IP del cliente para el rate limit se toma de X-Forwarded-For en app/ratelimit.py.
-CMD ["sh", "-c", "alembic upgrade head && if [ \"$AUTO_SEED\" = \"true\" ]; then python -m app.etl --seed --if-empty; fi && exec uvicorn app.main:create_app --factory --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["sh", "-c", "alembic upgrade head && if [ \"$AUTO_SEED\" = \"true\" ]; then python -m app.etl --seed --if-empty; fi && exec uvicorn app.main:create_app --factory --host 0.0.0.0 --port ${PORT:-8000} --no-server-header"]

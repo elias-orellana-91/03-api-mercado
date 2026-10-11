@@ -24,6 +24,7 @@ from app.logging_conf import RequestIdMiddleware, setup_logging
 from app.ml.store import ModelStore
 from app.ratelimit import RateLimitMiddleware
 from app.routers import market, ml, system
+from app.security_headers import SecurityHeadersMiddleware
 from app.sources.base import PriceSource
 
 log = logging.getLogger("app")
@@ -96,6 +97,7 @@ def create_app(
             allow_headers=["X-API-Key", "Content-Type", "X-Request-ID"],
         )
     app.add_middleware(RequestIdMiddleware)
+    app.add_middleware(SecurityHeadersMiddleware)  # el más externo: también cubre los 429 y los 4xx
 
     for r in (system.router, market.router, ml.router):
         app.include_router(r)
