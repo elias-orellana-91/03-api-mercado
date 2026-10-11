@@ -54,3 +54,14 @@ def test_etl_advisory_lock_is_exclusive_on_postgres(pg):
     a.release()
     assert b.acquire() is True
     b.release()
+
+def test_migration_0002_drops_and_restores_predictions_on_postgres(pg):
+    from sqlalchemy import inspect
+
+    cfg = Config("alembic.ini")
+    command.upgrade(cfg, "head")
+    assert "predictions" not in inspect(pg).get_table_names()
+    command.downgrade(cfg, "-1")
+    assert "predictions" in inspect(pg).get_table_names()
+    command.upgrade(cfg, "head")
+    assert "predictions" not in inspect(pg).get_table_names()

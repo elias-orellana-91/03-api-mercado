@@ -13,7 +13,6 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
-    UniqueConstraint,
     create_engine,
 )
 from sqlalchemy.engine import Engine
@@ -51,19 +50,6 @@ class Vix(Base):
 
     date: Mapped[date] = mapped_column(Date, primary_key=True)
     value: Mapped[float] = mapped_column(Float)
-
-
-class Prediction(Base):
-    __tablename__ = "predictions"
-    __table_args__ = (UniqueConstraint("ticker", "as_of_date", "model_version", name="uq_prediction"),)
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    ticker: Mapped[str] = mapped_column(ForeignKey("tickers.symbol"), index=True)
-    as_of_date: Mapped[date] = mapped_column(Date)
-    probability: Mapped[float] = mapped_column(Float)
-    predicted_class: Mapped[int] = mapped_column(Integer)
-    model_version: Mapped[str] = mapped_column(String(32))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class EtlRun(Base):

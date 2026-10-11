@@ -11,7 +11,7 @@ flowchart LR
     Y[(Yahoo Finance)] -->|solo ETL| A[app/sources/yahoo.py<br/>PriceSource]
     S[data/seed/*.parquet] -->|--seed, sin red| E
     A --> E[ETL<br/>python -m app.etl<br/>upsert + transacción]
-    E --> D[(PostgreSQL<br/>tickers · prices · vix<br/>predictions · etl_runs)]
+    E --> D[(PostgreSQL<br/>tickers · prices · vix<br/>etl_runs)]
     D --> F[FastAPI<br/>app/main.py]
     M[modelo P2<br/>SHA-256 verificado] --> F
     F --> G[Agente IA · proyecto 4]
@@ -125,7 +125,7 @@ El modelo (regresión logística) tiene ROC-AUC 0,646 en test: es una señal mod
 
 ## 🗄️ Base de datos y ETL
 
-Tablas (migraciones con Alembic): `tickers`, `prices` (PK ticker+fecha), `vix`, `predictions` (única por ticker+fecha+versión del modelo) y `etl_runs`.
+Tablas (migraciones con Alembic): `tickers`, `prices` (PK ticker+fecha), `vix` y `etl_runs`. Las predicciones no se guardan: se calculan al vuelo. La tabla `predictions` se eliminó con la migración `0002` (el downgrade la recrea).
 
 - `python -m app.etl --seed`: carga desde los parquet de `data/seed/` (copiados del proyecto 2), sin red.
 - `python -m app.etl`: incremental; pide a la fuente solo desde la última fecha cargada (con 7 días de solape).
