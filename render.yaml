@@ -1,0 +1,34 @@
+# Blueprint de Render: web service (Docker) + PostgreSQL gestionado.
+# Despliegue: Render Dashboard > New > Blueprint > selecciona el repositorio.
+databases:
+  - name: api-mercado-db
+    databaseName: mercado
+    user: mercado
+    plan: free   # el plan gratuito de Render tiene límites/expiración: revisa la política vigente
+
+services:
+  - type: web
+    name: api-mercado
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: api-mercado-db
+          property: connectionString
+      - key: ADMIN_API_KEY
+        generateValue: true          # Render genera un valor aleatorio; léelo en el panel (no está en el repo)
+      - key: ENVIRONMENT
+        value: production
+      - key: CORS_ORIGINS
+        sync: false                  # pídelo en el panel: URL(s) de la web, separadas por coma
+      - key: AUTO_SEED
+        value: "true"                # carga data/seed solo si la BD está vacía (primer despliegue)
+      - key: FORWARDED_ALLOW_IPS
+        value: "*"                   # Render termina TLS en su proxy: confía en X-Forwarded-For
+      - key: RATE_LIMIT
+        value: 60/minute
+      - key: LOG_LEVEL
+        value: INFO
