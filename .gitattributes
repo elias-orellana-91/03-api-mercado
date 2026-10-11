@@ -1,0 +1,4 @@
+# Los artefactos del modelo se verifican por SHA-256: git no debe tocar sus saltos de línea.
+app/ml/artifacts/* -text
+*.parquet binary
+*.joblib binary
