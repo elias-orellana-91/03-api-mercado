@@ -1,0 +1,15 @@
+# Avisos y PRs automáticos de actualización (también de seguridad) para dependencias, actions e imagen base.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly

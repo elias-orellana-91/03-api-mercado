@@ -329,3 +329,17 @@ def test_dockerfile_hides_server_header_and_does_not_trust_proxy_headers():
     cmd = text[text.rindex("CMD ["):]
     assert "--no-server-header" in cmd and "--proxy-headers" not in cmd
     assert "FORWARDED_ALLOW_IPS" not in (Path(__file__).resolve().parents[1] / "render.yaml").read_text(encoding="utf-8")
+
+# ---------- CI / Docker fijados ----------
+def test_ci_and_docker_supply_chain_pinning():
+    root = Path(__file__).resolve().parents[1]
+    ci = (root / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    assert re.search(r"^permissions:\s*\n\s+contents: read", ci, re.M)
+    uses = re.findall(r"uses:\s*(\S+)", ci)
+    assert uses and all(re.fullmatch(r"[\w./-]+@[0-9a-f]{40}", u) for u in uses), uses  # actions por SHA de commit
+    docker = (root / "Dockerfile").read_text(encoding="utf-8")
+    froms = re.findall(r"^FROM\s+(\S+)", docker, re.M)
+    assert froms and all(re.fullmatch(r"[\w./:-]+@sha256:[0-9a-f]{64}", f) for f in froms), froms
+    dependabot = (root / ".github" / "dependabot.yml").read_text(encoding="utf-8")
+    for eco in ("pip", "github-actions", "docker"):
+        assert f"package-ecosystem: {eco}" in dependabot
