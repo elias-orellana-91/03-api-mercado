@@ -343,3 +343,36 @@ def test_ci_and_docker_supply_chain_pinning():
     dependabot = (root / ".github" / "dependabot.yml").read_text(encoding="utf-8")
     for eco in ("pip", "github-actions", "docker"):
         assert f"package-ecosystem: {eco}" in dependabot
+
+def _limited_client(seeded_factory, model_store):
+    app = create_app(
+        make_settings(rate_limit="3/minute", rate_limit_enabled=True), seeded_factory, model_store, forbidden_source_factory
+    )
+    return TestClient(app)
+
+
+def test_rate_limit_not_bypassed_by_multiple_xff_lines(seeded_factory, model_store):
+    with _limited_client(seeded_factory, model_store) as c:
+        codes = [
+            c.get("/tickers", headers=[("X-Forwarded-For", f"10.0.{i}.1"), ("X-Forwarded-For", "203.0.113.7")]).status_code
+            for i in range(6)
+        ]
+    assert codes == [200, 200, 200, 429, 429, 429]
+
+
+def test_rate_limit_single_xff_line_with_many_values_still_works(seeded_factory, model_store):
+    with _limited_client(seeded_factory, model_store) as c:
+        codes = [c.get("/tickers", headers={"X-Forwarded-For": f"10.0.{i}.1, 10.1.1.1, 203.0.113.7"}).status_code for i in range(5)]
+    assert codes == [200, 200, 200, 429, 429]
+
+
+@pytest.mark.parametrize("value", ["", " ", ",", "a,,", "a, ,", ",,"])
+def test_rate_limit_empty_xff_elements_do_not_500(seeded_factory, model_store, value):
+    from starlette.requests import Request
+
+    from app.ratelimit import client_ip
+
+    scope = {"type": "http", "headers": [(b"x-forwarded-for", value.encode())], "client": ("192.0.2.5", 1)}
+    assert client_ip(Request(scope)) == ("a" if value.startswith("a") else "192.0.2.5")
+    with _limited_client(seeded_factory, model_store) as c:
+        assert c.get("/tickers", headers={"X-Forwarded-For": value}).status_code == 200

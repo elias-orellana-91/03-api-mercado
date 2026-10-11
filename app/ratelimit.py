@@ -24,14 +24,15 @@ from app.logging_conf import request_id_ctx
 def client_ip(request: Request) -> str:
     """IP del cliente para el límite: la última de ``X-Forwarded-For`` (la agrega el proxy, no el cliente).
 
-    Las anteriores las puede inventar el cliente, así que rotarlas no evita el bloqueo. Sin la cabecera
+    Las anteriores (y cualquier línea repetida de la cabecera) las puede inventar el cliente, así que rotarlas no evita el bloqueo. Sin la cabecera
     (acceso directo) se usa la IP del socket.
     """
-    xff = request.headers.get("x-forwarded-for")
-    if xff:
-        last = xff.split(",")[-1].strip()
-        if last:
-            return last
+    # getlist: el cliente puede mandar varias líneas de la cabecera; ``get`` solo devolvería la primera
+    # (controlada por él). Se unen todas y se toma el último elemento no vacío.
+    parts = [p.strip() for line in request.headers.getlist("x-forwarded-for") for p in line.split(",")]
+    parts = [p for p in parts if p]
+    if parts:
+        return parts[-1]
     return request.client.host if request.client else "unknown"
 
 
