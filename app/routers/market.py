@@ -112,7 +112,9 @@ def get_metrics(
     description=(
         "`period=month|quarter|ytd` calcula el acumulado del mes/trimestre/año en curso hasta la última fecha "
         "con datos (base = último cierre anterior al periodo). `period=custom` requiere `start` (y opcionalmente `end`). "
-        "`order=desc` (por defecto) devuelve primero el valor más alto."
+        "`order=desc` (por defecto) devuelve primero el valor más alto. "
+        "El campo `best` es siempre el rank 1 según `order`, no un juicio de calidad: con `order=asc` o "
+        "`metric=volatility` no significa \"mejor\" (p. ej. `volatility&order=desc` devuelve primero la más volátil)."
     ),
 )
 def get_ranking(

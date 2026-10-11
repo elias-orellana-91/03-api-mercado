@@ -72,7 +72,13 @@ class RankingResponse(BaseModel):
     order: Literal["desc", "asc"]
     start: date = Field(description="Primera fecha de precio usada (base del cálculo)")
     end: date
-    best: RankingItem | None
+    best: RankingItem | None = Field(
+        description=(
+            "Primer elemento del ranking (rank 1) según `order`, no necesariamente el \"mejor\": con `order=asc` "
+            "es el de menor valor y con `metric=volatility` el de mayor/menor volatilidad según `order`. "
+            "Es `null` si no hay datos."
+        )
+    )
     items: list[RankingItem]
     model_config = _ex(
         {

@@ -83,6 +83,16 @@ def test_ranking_asc_and_limit(mini):
     assert [i["ticker"] for i in body["items"]] == ["XOM", "AAPL"]
 
 
+def test_ranking_best_is_rank_one_regardless_of_order_and_metric(mini):
+    # Documentado en OpenAPI/README: `best` = rank 1 según `order`, no "el mejor" (asc / volatility).
+    asc = mini.get("/ranking", params={"period": "month", "order": "asc"}).json()
+    assert asc["best"] == asc["items"][0] and asc["best"]["rank"] == 1 and asc["best"]["ticker"] == "XOM"
+    vol = mini.get("/ranking", params={"period": "month", "metric": "volatility"}).json()
+    assert vol["best"] == vol["items"][0] and vol["best"]["rank"] == 1
+    desc = mini.get("/openapi.json").json()["paths"]["/ranking"]["get"]["description"]
+    assert "`best`" in desc and "rank 1" in desc
+
+
 def test_ranking_volatility_and_sharpe_by_hand(mini):
     window = {s: pd.Series(v[1:], dtype=float) for s, v in SERIES.items()}  # base 28-nov .. 4-dic
     vols = {s: p.pct_change().dropna().std(ddof=1) * np.sqrt(252) for s, p in window.items()}

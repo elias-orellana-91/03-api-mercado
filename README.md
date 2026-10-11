@@ -57,7 +57,7 @@ curl http://localhost:8000/model/info
 curl -X POST http://localhost:8000/admin/etl -H "X-API-Key: $ADMIN_API_KEY"
 ```
 
-**Semántica del ranking:** `month`, `quarter` y `ytd` calculan el acumulado del periodo en curso hasta la última fecha con datos; la base es el **último cierre anterior** al inicio del periodo (así el retorno incluye el primer día). `custom` requiere `start`. `order=desc` (por defecto) devuelve primero el valor más alto; para "la acción menos volátil" usa `metric=volatility&order=asc`.
+**Semántica del ranking:** `month`, `quarter` y `ytd` calculan el acumulado del periodo en curso hasta la última fecha con datos; la base es el **último cierre anterior** al inicio del periodo (así el retorno incluye el primer día). `custom` requiere `start`. `order=desc` (por defecto) devuelve primero el valor más alto; para "la acción menos volátil" usa `metric=volatility&order=asc`. **Ojo con `best`:** es siempre el elemento de rank 1 según `order`, no un juicio de calidad; con `order=asc` o `metric=volatility` no significa "mejor" (con volatilidad y `order=desc` es la más volátil). El campo no se renombra para no cambiar el contrato.
 
 ## 🚀 Cómo ejecutarla
 
