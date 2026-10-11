@@ -5,10 +5,8 @@ from dataclasses import dataclass
 from datetime import date
 
 import pandas as pd
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db import Prediction, utcnow
 from app.errors import ApiError
 from app.ml.features import build_features
 from app.ml.store import ModelStore
@@ -64,33 +62,3 @@ def predict(db: Session, store: ModelStore, symbols: list[str], target: date) ->
         PredictionResult(t, target, float(p), int(p >= thr), version, thr)
         for t, p in zip(row.index, proba, strict=True)
     ]
-
-
-def save_predictions(db: Session, results: list[PredictionResult]) -> dict[str, object]:
-    """Guarda (upsert por ticker+fecha+versión) y devuelve ``created_at`` por ticker."""
-    created = {}
-    now = utcnow()
-    for r in results:
-        existing = db.scalar(
-            select(Prediction).where(
-                Prediction.ticker == r.ticker,
-                Prediction.as_of_date == r.as_of_date,
-                Prediction.model_version == r.model_version,
-            )
-        )
-        if existing:
-            existing.probability, existing.predicted_class, existing.created_at = r.probability, r.predicted_class, now
-        else:
-            db.add(
-                Prediction(
-                    ticker=r.ticker,
-                    as_of_date=r.as_of_date,
-                    probability=r.probability,
-                    predicted_class=r.predicted_class,
-                    model_version=r.model_version,
-                    created_at=now,
-                )
-            )
-        created[r.ticker] = now
-    db.commit()
-    return created

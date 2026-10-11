@@ -30,7 +30,7 @@ Documentación interactiva (Swagger, con ejemplos y esquemas de error): **`/docs
 | GET | `/metrics/{ticker}?start=&end=` | Retorno total, volatilidad anualizada, max drawdown y Sharpe |
 | GET | `/ranking?period=month\|quarter\|ytd\|custom&metric=return\|volatility\|sharpe&order=&start=&end=&limit=` | "¿Qué acción rindió mejor este mes?" (pensado para el agente) |
 | GET | `/sectors/summary?start=&end=` | Resumen por sector (cartera de igual ponderación) |
-| GET | `/predictions/{ticker}?date=` | Probabilidad de volatilidad alta en los próximos 5 días hábiles (por defecto, la última fecha). Se guarda en `predictions` |
+| GET | `/predictions/{ticker}?date=` | Probabilidad de volatilidad alta en los próximos 5 días hábiles (por defecto, la última fecha). Solo calcula: no escribe en la BD |
 | GET | `/predictions/latest` | Todos los tickers en la última fecha |
 | GET | `/model/info` | Versión, fecha de entrenamiento, métricas de test, features y hash |
 | POST | `/admin/etl` | Dispara una carga incremental. Requiere cabecera `X-API-Key` |

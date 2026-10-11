@@ -94,12 +94,19 @@ def test_prediction_default_is_last_date(client, market):
     assert b["label"] == ("alta" if b["predicted_class"] else "normal")
 
 
-def test_prediction_is_stored_once(client, seeded_factory):
+def test_prediction_get_does_not_write_to_db(client, seeded_factory, market):
+    """Un GET anónimo solo calcula: la tabla predictions no cambia (ni con fechas distintas ni con /latest)."""
+
+    def n_rows():
+        with seeded_factory() as s:
+            return s.scalar(select(func.count()).select_from(Prediction))
+
+    before = n_rows()
     client.get("/predictions/JPM")
-    client.get("/predictions/JPM")
-    with seeded_factory() as s:
-        n = s.scalar(select(func.count()).select_from(Prediction).where(Prediction.ticker == "JPM"))
-    assert n == 1  # misma fecha y versión => una sola fila (upsert)
+    for d in market.prices.index[-5:]:
+        assert client.get("/predictions/JPM", params={"date": str(d.date())}).status_code == 200
+    assert client.get("/predictions/latest").status_code == 200
+    assert n_rows() == before == 0
 
 
 def test_prediction_with_explicit_date(client, market):

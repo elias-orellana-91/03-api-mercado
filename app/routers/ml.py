@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.db import Price, Ticker
+from app.db import Price, Ticker, utcnow
 from app.deps import get_db, get_store, valid_ticker
 from app.errors import ERROR_RESPONSES, ApiError
 from app.ml.store import ModelStore
@@ -44,10 +44,8 @@ def predictions_latest(db: Session = Depends(get_db), store: ModelStore = Depend
         raise ApiError(404, "no_data", "No hay datos de precios cargados.")
     symbols = list(db.scalars(select(Price.ticker).where(Price.date == last).order_by(Price.ticker)))
     results = predictor.predict(db, store, symbols, last)
-    created = predictor.save_predictions(db, results)
-    return PredictionsLatestResponse(
-        as_of_date=last, count=len(results), items=[_out(r, created[r.ticker]) for r in results]
-    )
+    now = utcnow()  # los GET solo calculan: no se escribe en la BD
+    return PredictionsLatestResponse(as_of_date=last, count=len(results), items=[_out(r, now) for r in results])
 
 
 @router.get(
@@ -55,7 +53,7 @@ def predictions_latest(db: Session = Depends(get_db), store: ModelStore = Depend
     response_model=PredictionOut,
     responses=RESP,
     summary="Probabilidad de volatilidad alta en los próximos 5 días hábiles",
-    description="Por defecto usa la última fecha con datos del ticker. La predicción se guarda en la tabla `predictions`.",
+    description="Por defecto usa la última fecha con datos del ticker. La predicción se calcula al vuelo; este GET no escribe en la base de datos (`created_at` es el momento del cálculo).",
 )
 def prediction_for_ticker(
     ticker: Ticker = Depends(valid_ticker),
@@ -73,8 +71,7 @@ def prediction_for_ticker(
     results = predictor.predict(db, store, [ticker.symbol], date_)
     if not results:
         raise ApiError(422, "features_unavailable", "No se pudo calcular la predicción para esa fecha.")
-    created = predictor.save_predictions(db, results)
-    return _out(results[0], created[ticker.symbol])
+    return _out(results[0], utcnow())  # solo calcula: este GET no escribe en la BD
 
 
 @router.get(
