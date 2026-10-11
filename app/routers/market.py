@@ -48,7 +48,7 @@ def get_prices(
     start: date | None = Query(None, description="Fecha inicial (YYYY-MM-DD), inclusive"),
     end: date | None = Query(None, description="Fecha final (YYYY-MM-DD), inclusive"),
     limit: int = Query(500, ge=1, le=5000, description="Máximo de filas por página"),
-    offset: int = Query(0, ge=0),
+    offset: int = Query(0, ge=0, le=1_000_000, description="Filas a saltar (máx. 1.000.000)"),
     order: Literal["asc", "desc"] = Query("asc", description="Orden por fecha"),
     db: Session = Depends(get_db),
 ):

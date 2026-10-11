@@ -51,6 +51,7 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
         incoming = request.headers.get("x-request-id", "")
         rid = incoming if _VALID_ID.match(incoming) else uuid.uuid4().hex
         token = request_id_ctx.set(rid)
+        request.state.request_id = rid  # para el manejador de errores 500, que corre fuera de este middleware
         start = time.perf_counter()
         status = 500
         try:

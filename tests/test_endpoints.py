@@ -161,3 +161,28 @@ def test_openapi_documents_error_schema_and_examples(client):
 
 def test_pandas_dtypes_sanity(market):
     assert isinstance(market.prices, pd.DataFrame)
+
+
+def test_huge_offset_is_422_not_500(client):
+    for off in ("100000000000000000000", "1000001", "-1"):
+        r = client.get("/prices/AAPL", params={"offset": off})
+        assert r.status_code == 422 and r.json()["error"]["code"] == "validation_error"
+    assert client.get("/prices/AAPL", params={"offset": 1_000_000}).status_code == 200
+
+
+def test_unhandled_500_keeps_request_id(seeded_factory, model_store):
+    from fastapi.testclient import TestClient
+
+    from app.main import create_app
+    from tests.conftest import forbidden_source_factory, make_settings
+
+    app = create_app(make_settings(), seeded_factory, model_store, forbidden_source_factory)
+
+    @app.get("/boom")
+    def boom():
+        raise ValueError("secreto interno")
+
+    with TestClient(app, raise_server_exceptions=False) as c:
+        r = c.get("/boom", headers={"X-Request-ID": "req-500-abcdef"})
+    assert r.status_code == 500 and "secreto" not in r.text
+    assert r.json()["error"]["request_id"] == "req-500-abcdef" and r.headers["x-request-id"] == "req-500-abcdef"

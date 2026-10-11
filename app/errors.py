@@ -38,8 +38,10 @@ ERROR_RESPONSES = {
 }
 
 
-def _payload(code: str, message: str, details: list[dict] | None = None) -> dict:
-    return {"error": {"code": code, "message": message, "details": details, "request_id": request_id_ctx.get()}}
+def _payload(code: str, message: str, details: list[dict] | None = None, request_id: str | None = None) -> dict:
+    return {
+        "error": {"code": code, "message": message, "details": details, "request_id": request_id or request_id_ctx.get()}
+    }
 
 
 def register_handlers(app: FastAPI) -> None:
@@ -58,6 +60,12 @@ def register_handlers(app: FastAPI) -> None:
         return JSONResponse(_payload(code, str(exc.detail)), status_code=exc.status_code, headers=exc.headers)
 
     @app.exception_handler(Exception)
-    async def _unhandled(_: Request, exc: Exception):
+    async def _unhandled(request: Request, exc: Exception):
         log.exception("Error no controlado")  # el traceback va al log, nunca a la respuesta
-        return JSONResponse(_payload("internal_error", "Error interno del servidor."), status_code=500)
+        # Este manejador corre fuera de RequestIdMiddleware: el id se lee de request.state
+        rid = getattr(request.state, "request_id", None)
+        return JSONResponse(
+            _payload("internal_error", "Error interno del servidor.", request_id=rid),
+            status_code=500,
+            headers={"X-Request-ID": rid} if rid else None,
+        )
