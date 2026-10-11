@@ -1,0 +1,181 @@
+{
+  "model_name": "Regresión logística",
+  "model_version": "0.1.0",
+  "trained_at": "2026-10-11T02:47:55+00:00",
+  "features": [
+    "vol_5",
+    "vol_21",
+    "vol_63",
+    "vol_ratio_5_63",
+    "vol_ratio_21_63",
+    "vol5_vs_med252",
+    "ret_1",
+    "ret_5",
+    "ret_21",
+    "abs_ret_1",
+    "dd_63",
+    "spy_vol_5",
+    "spy_vol_21",
+    "vix",
+    "vix_chg_5",
+    "vix_vs_ma63",
+    "volume_ratio_5_63",
+    "dow",
+    "sector_tecnologia",
+    "sector_bancos",
+    "sector_energia",
+    "sector_salud",
+    "sector_consumo",
+    "sector_indice"
+  ],
+  "decision_threshold": 0.5,
+  "target": "vol_fwd_5d > mediana móvil 252d (trailing) de la vol 5d del ticker",
+  "trained_on": "2016-01-08 a 2022-12-22 (train+validación, 27968 filas)",
+  "trained_on_range": {
+    "start": "2016-01-08",
+    "end": "2022-12-22"
+  },
+  "required_inputs": {
+    "series": {
+      "prices": "Precios de cierre ajustados diarios (DataFrame Date x Ticker). Debe incluir el ticker objetivo y SPY.",
+      "vix": "Cierre diario del ^VIX (Series indexada por fecha).",
+      "volume": "Volumen diario (DataFrame Date x Ticker) del ticker objetivo y SPY."
+    },
+    "market_ticker": "SPY",
+    "min_history_days": 257,
+    "tickers": {
+      "AAPL": "Tecnología",
+      "AMZN": "Tecnología",
+      "BAC": "Bancos",
+      "CVX": "Energía",
+      "GOOGL": "Tecnología",
+      "GS": "Bancos",
+      "JNJ": "Salud",
+      "JPM": "Bancos",
+      "KO": "Consumo",
+      "MSFT": "Tecnología",
+      "NVDA": "Tecnología",
+      "PFE": "Salud",
+      "SPY": "Índice",
+      "UNH": "Salud",
+      "WMT": "Consumo",
+      "XOM": "Energía"
+    },
+    "feature_builder": "src.features.build_features"
+  },
+  "hyperparameters": {
+    "clf__C": 10.0
+  },
+  "test_metrics": {
+    "roc_auc": 0.645629676514955,
+    "pr_auc": 0.5983833166298014,
+    "f1": 0.5167494452076509,
+    "precision": 0.5970695970695971,
+    "recall": 0.4554769001490313,
+    "brier": 0.23309532942447303,
+    "threshold": 0.5,
+    "base_rate": 0.4497319034852547,
+    "n": 11936,
+    "confusion_matrix": [
+      [
+        4918,
+        1650
+      ],
+      [
+        2923,
+        2445
+      ]
+    ]
+  },
+  "baseline_test_metrics": {
+    "roc_auc": 0.588195589054822,
+    "pr_auc": 0.5458315133615728,
+    "f1": 0.5165181885671863,
+    "precision": 0.5146079881656804,
+    "recall": 0.5184426229508197,
+    "brier": null,
+    "threshold": 1.0,
+    "base_rate": 0.4497319034852547,
+    "n": 11936,
+    "confusion_matrix": [
+      [
+        3943,
+        2625
+      ],
+      [
+        2585,
+        2783
+      ]
+    ]
+  },
+  "baselines_test_metrics": {
+    "Persistencia": {
+      "roc_auc": 0.588195589054822,
+      "pr_auc": 0.5458315133615728,
+      "f1": 0.5165181885671863,
+      "precision": 0.5146079881656804,
+      "recall": 0.5184426229508197,
+      "brier": null,
+      "threshold": 1.0,
+      "base_rate": 0.4497319034852547,
+      "n": 11936,
+      "confusion_matrix": [
+        [
+          3943,
+          2625
+        ],
+        [
+          2585,
+          2783
+        ]
+      ]
+    },
+    "Logística 1 feature": {
+      "roc_auc": 0.588195589054822,
+      "pr_auc": 0.5458315133615728,
+      "f1": 0.46351022137485437,
+      "precision": 0.537196169899337,
+      "recall": 0.4076005961251863,
+      "brier": 0.24309987542920194,
+      "threshold": 0.5,
+      "base_rate": 0.4497319034852547,
+      "n": 11936,
+      "confusion_matrix": [
+        [
+          4683,
+          1885
+        ],
+        [
+          3180,
+          2188
+        ]
+      ]
+    },
+    "HAR-RV": {
+      "roc_auc": 0.6270867047655525,
+      "pr_auc": 0.577042750914776,
+      "f1": 0.5917519181585678,
+      "precision": 0.5181970884658454,
+      "recall": 0.6896423248882265,
+      "brier": null,
+      "threshold": 1.0,
+      "base_rate": 0.4497319034852547,
+      "n": 11936,
+      "confusion_matrix": [
+        [
+          3126,
+          3442
+        ],
+        [
+          1666,
+          3702
+        ]
+      ]
+    }
+  },
+  "library_versions": {
+    "scikit-learn": "1.9.1",
+    "xgboost": "3.4.1",
+    "pandas": "3.0.6"
+  }
+}
