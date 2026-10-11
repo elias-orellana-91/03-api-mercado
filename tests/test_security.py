@@ -1,0 +1,188 @@
+"""API key, CORS, rate limiting, request id, errores de BD y aislamiento de la fuente externa."""
+from __future__ import annotations
+
+import logging
+import re
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+from pydantic import ValidationError
+from sqlalchemy import select
+
+from app.config import Settings
+from app.db import EtlRun, make_engine, make_session_factory
+from app.main import create_app
+from app.sources.base import MarketData
+from tests.conftest import ADMIN_KEY, forbidden_source_factory, make_settings, new_factory, synthetic_market
+
+
+class RecordingSource:
+    def __init__(self):
+        self.called = 0
+
+    def fetch(self, tickers, start, end):
+        self.called += 1
+        m = synthetic_market(n_days=5)
+        return MarketData(m.prices, m.volume, m.vix)
+
+
+# ---------- /admin/etl ----------
+def admin_client(model_store, source=None, **settings_kw):
+    factory = new_factory()
+    src = source or RecordingSource()
+    app = create_app(make_settings(**settings_kw), factory, model_store, lambda: src)
+    return TestClient(app), factory, src
+
+
+def test_admin_without_key_is_401(model_store):
+    c, _, src = admin_client(model_store)
+    r = c.post("/admin/etl")
+    assert r.status_code == 401 and r.json()["error"]["code"] == "invalid_api_key"
+    assert src.called == 0
+
+
+def test_admin_wrong_key_is_401(model_store):
+    c, _, src = admin_client(model_store)
+    for bad in ("wrong", ADMIN_KEY + "x", ADMIN_KEY[:-1], ""):
+        r = c.post("/admin/etl", headers={"X-API-Key": bad})
+        assert r.status_code == 401
+    assert src.called == 0
+
+
+def test_admin_correct_key_runs_etl(model_store):
+    c, factory, src = admin_client(model_store)
+    r = c.post("/admin/etl", headers={"X-API-Key": ADMIN_KEY})
+    assert r.status_code == 202 and r.json()["status"] == "accepted"
+    assert src.called == 1  # el background task ya corrió (TestClient)
+    with factory() as s:
+        run = s.scalars(select(EtlRun)).one()
+    assert run.status == "success" and run.mode == "incremental"
+
+
+def test_admin_get_not_allowed(model_store):
+    c, _, _ = admin_client(model_store)
+    assert c.get("/admin/etl", headers={"X-API-Key": ADMIN_KEY}).status_code == 405
+
+
+def test_admin_disabled_without_configured_key(model_store):
+    c, _, src = admin_client(model_store, admin_api_key=None)
+    r = c.post("/admin/etl", headers={"X-API-Key": "lo-que-sea"})
+    assert r.status_code == 503 and r.json()["error"]["code"] == "admin_disabled"
+    assert src.called == 0
+
+
+def test_admin_conflict_when_etl_running(model_store):
+    c, factory, src = admin_client(model_store)
+    with factory() as s:
+        s.add(EtlRun(mode="incremental", status="running"))
+        s.commit()
+    r = c.post("/admin/etl", headers={"X-API-Key": ADMIN_KEY})
+    assert r.status_code == 409 and r.json()["error"]["code"] == "etl_in_progress" and src.called == 0
+
+
+def test_admin_etl_failure_is_recorded_not_raised(model_store):
+    class Broken:
+        def fetch(self, *a, **k):
+            raise ConnectionError("sin red")
+
+    c, factory, _ = admin_client(model_store, source=Broken())
+    assert c.post("/admin/etl", headers={"X-API-Key": ADMIN_KEY}).status_code == 202
+    with factory() as s:
+        assert s.scalars(select(EtlRun)).one().status == "failed"
+
+
+def test_api_key_never_logged(model_store, caplog):
+    c, _, _ = admin_client(model_store)
+    with caplog.at_level(logging.DEBUG):
+        c.post("/admin/etl", headers={"X-API-Key": ADMIN_KEY})
+        c.post("/admin/etl", headers={"X-API-Key": "otra-clave-secreta"})
+    text = "\n".join(r.getMessage() + str(getattr(r, "extra_fields", "")) for r in caplog.records)
+    assert ADMIN_KEY not in text and "otra-clave-secreta" not in text
+
+
+# ---------- CORS ----------
+def test_cors_allows_only_configured_origins(seeded_factory, model_store):
+    app = create_app(make_settings(cors_origins="https://mi-web.example"), seeded_factory, model_store, forbidden_source_factory)
+    with TestClient(app) as c:
+        ok = c.get("/tickers", headers={"Origin": "https://mi-web.example"})
+        bad = c.get("/tickers", headers={"Origin": "https://evil.example"})
+    assert ok.headers.get("access-control-allow-origin") == "https://mi-web.example"
+    assert "access-control-allow-origin" not in bad.headers
+
+
+def test_cors_disabled_by_default(client):
+    r = client.get("/tickers", headers={"Origin": "https://cualquiera.example"})
+    assert "access-control-allow-origin" not in r.headers
+
+
+def test_wildcard_cors_rejected_in_production():
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, environment="production", cors_origins="*")
+    assert Settings(_env_file=None, environment="development", cors_origins="*").cors_origins == ["*"]
+
+
+def test_database_url_normalized_for_psycopg3():
+    assert Settings(_env_file=None, database_url="postgres://u:p@h/db").database_url == "postgresql+psycopg://u:p@h/db"
+    assert Settings(_env_file=None, database_url="postgresql://u:p@h/db").database_url.startswith("postgresql+psycopg://")
+
+
+# ---------- rate limit ----------
+def test_rate_limit_returns_429_with_error_schema(seeded_factory, model_store):
+    app = create_app(
+        make_settings(rate_limit="3/minute", rate_limit_enabled=True), seeded_factory, model_store, forbidden_source_factory
+    )
+    with TestClient(app) as c:
+        codes = [c.get("/tickers").status_code for _ in range(5)]
+        limited = c.get("/tickers")
+        health = [c.get("/health").status_code for _ in range(6)]  # /health está exento
+    assert codes[:3] == [200, 200, 200] and codes[3:] == [429, 429]
+    assert limited.json()["error"]["code"] == "rate_limited"
+    assert set(health) == {200}
+
+
+# ---------- request id y errores ----------
+def test_request_id_generated_and_propagated(client):
+    r = client.get("/tickers")
+    assert re.fullmatch(r"[0-9a-f]{32}", r.headers["x-request-id"])
+    mine = "abc-12345678"
+    r2 = client.get("/prices/ZZZ", headers={"X-Request-ID": mine})
+    assert r2.headers["x-request-id"] == mine and r2.json()["error"]["request_id"] == mine
+    r3 = client.get("/tickers", headers={"X-Request-ID": "mal id con espacios\n"})
+    assert r3.headers["x-request-id"] != "mal id con espacios"
+
+
+def test_unavailable_database_gives_503(model_store):
+    empty = make_session_factory(make_engine("sqlite://"))  # sin tablas => OperationalError
+    with TestClient(create_app(make_settings(), empty, model_store, forbidden_source_factory)) as c:
+        h = c.get("/health")
+        assert h.status_code == 503 and h.json()["status"] == "unavailable" and h.json()["database"]["ok"] is False
+        r = c.get("/tickers")
+        assert r.status_code == 503 and r.json()["error"]["code"] == "database_unavailable"
+        assert "sqlite" not in r.text.lower()  # no se filtran detalles internos
+
+
+# ---------- los endpoints nunca llaman a Yahoo ----------
+READ_ENDPOINTS = [
+    "/health", "/tickers", "/prices/AAPL", "/metrics/AAPL", "/ranking", "/ranking?period=ytd&metric=sharpe",
+    "/sectors/summary", "/predictions/AAPL", "/predictions/latest", "/model/info", "/prices/ZZZ", "/openapi.json",
+]
+
+
+@pytest.mark.parametrize("path", READ_ENDPOINTS)
+def test_read_endpoints_never_call_external_source(client, path):
+    # forbidden_source_factory y yfinance.download (autouse) fallan si se invocan
+    assert client.get(path).status_code in (200, 404)
+
+
+def test_yfinance_is_isolated_in_a_single_adapter():
+    root = Path(__file__).resolve().parents[1] / "app"
+    offenders = [
+        str(p.relative_to(root)) for p in root.rglob("*.py") if "yfinance" in p.read_text(encoding="utf-8") and p.name != "yahoo.py"
+    ]
+    # solo se permite mencionar yfinance en comentarios/docstrings de módulos no-adaptador
+    for rel in offenders:
+        text = (root / rel).read_text(encoding="utf-8")
+        assert not re.search(r"^\s*(import|from)\s+yfinance", text, re.M), f"{rel} importa yfinance"
+    imports = [p for p in root.rglob("*.py") if re.search(r"^\s*(import|from)\s+yfinance", p.read_text(encoding="utf-8"), re.M)]
+    assert [p.name for p in imports] == ["yahoo.py"]
